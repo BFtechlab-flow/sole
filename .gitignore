@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.DS_Store
+checkpoints/
+oof/
+outputs/
+submission.csv
+*.pt
+*.pth
