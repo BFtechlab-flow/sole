@@ -1,0 +1,39 @@
+seed: 2026
+n_folds: 5
+fold: 0
+data:
+  root: /kaggle/input/filament-segmentation-2026/MAGFiLO_1.0_Kaggle_2026
+  train_json: train/MAGFiLO_1.0_Annotations_kaggle2026_train.json
+  train_images: train/train_images
+  test_images: test/test_images
+model:
+  encoder: convnext_tiny.fb_in1k
+  pretrained: true
+  fpn_channels: 128
+train:
+  patch_size: 1024
+  epochs: 25
+  batch_size: 2
+  workers: 4
+  lr: 0.0002
+  weight_decay: 0.0001
+  amp: true
+loss:
+  region_bce: 0.25
+  region_dice: 0.30
+  center_bce: 0.10
+  center_dice: 0.15
+  boundary_bce: 0.08
+  distance: 0.12
+inference:
+  tile: 1024
+  overlap: 256
+  tta: true
+  region_threshold: 0.45
+  center_threshold: 0.35
+  min_region_area: 64
+  min_instance_area: 250
+  bridge_max_distance: 28
+  bridge_min_alignment: 0.80
+metric:
+  iou_match_threshold: 0.50
