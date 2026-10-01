@@ -3,8 +3,6 @@ n_folds: 5
 fold: 0
 
 cv:
-  # "observation" guarantees all annotator records of the same physical JPEG
-  # remain in one fold. "day" or "month" can be tested as stricter temporal CV.
   group_mode: observation
 
 data:
@@ -13,19 +11,37 @@ data:
   train_images: train/train_images
   test_images: test/test_images
 
+targets:
+  # 1.0 in the width target corresponds to a 64-pixel filament diameter.
+  width_scale_px: 64.0
+
 model:
   encoder: convnext_tiny.fb_in1k
   pretrained: true
   fpn_channels: 128
+  advanced:
+    enabled: true
+    # Innovation registry. Architectural switches are kept explicit so the
+    # OOF ablation campaign can disable them independently in future configs.
+    limb_gate: true
+    multiscale_context: true
+    frequency_branch: true
+    width_head: true
+    curvature_head: true
+    endpoint_head: true
+    junction_head: true
+    uncertainty_head: true
 
 train:
   patch_size: 1024
-  epochs: 25
+  epochs: 30
   batch_size: 2
   val_batch_size: 2
   workers: 4
   lr: 0.0002
+  min_lr: 0.000001
   weight_decay: 0.0001
+  grad_clip_norm: 1.0
   amp: true
   val_interval: 1
   validation_tta: false
@@ -39,6 +55,15 @@ loss:
   distance: 0.12
   topology: 0.05
   orientation: 0.08
+  # Advanced losses start deliberately small. OOF ablation decides whether
+  # they survive into the final model.
+  width: 0.05
+  curvature: 0.025
+  endpoint: 0.035
+  junction: 0.020
+  centerline_ce: 0.040
+  radius_balance: 0.040
+  uncertainty_region: 0.030
 
 inference:
   tile: 1024
@@ -52,10 +77,10 @@ inference:
   bridge_min_alignment: 0.80
   bridge_min_region: 0.20
   bridge_max_boundary: 0.75
+  bridge_max_width_ratio: 2.5
+  bridge_width_weight: 0.35
 
 metric:
-  # Organizer PQ uses a strict IoU > 0.50 match.
   iou_match_threshold: 0.50
-  # Diagnostic only: fragmentation/merging relation threshold, not part of PQ.
   relation_iou_threshold: 0.10
   bootstrap_iterations: 1000

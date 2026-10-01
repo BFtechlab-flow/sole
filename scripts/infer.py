@@ -16,6 +16,16 @@ from src.submission import save_verification, validate_submission_frame
 from src.utils import image_files, load_yaml, resolve_path
 
 
+def build_model(cfg, device):
+    return FILANet(
+        cfg["model"]["encoder"],
+        False,
+        cfg["model"]["fpn_channels"],
+        4,
+        advanced=cfg["model"].get("advanced", {}),
+    ).to(device)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="configs/filanet.yaml")
@@ -29,7 +39,7 @@ def main():
     models = []
     for weights in args.weights:
         ck = torch.load(weights, map_location=device)
-        model = FILANet(cfg["model"]["encoder"], False, cfg["model"]["fpn_channels"], 4).to(device)
+        model = build_model(cfg, device)
         model.load_state_dict(ck["model"])
         model.eval()
         models.append(model)
@@ -47,11 +57,17 @@ def main():
             raise FileNotFoundError(path)
         image_shapes[path.stem] = image.shape
         x = build_input_channels(image)
-        preds = [predict_tiled(m, x, device, inf["tile"], inf["overlap"], inf["tta"]) for m in models]
-        mean = {
-            key: sum(q[key] for q in preds) / len(preds)
-            for key in ("region", "centerline", "boundary", "distance")
-        }
+        preds = [
+            predict_tiled(m, x, device, inf["tile"], inf["overlap"], inf["tta"])
+            for m in models
+        ]
+
+        keys = ["region", "centerline", "boundary", "distance"]
+        for optional in ("width", "curvature", "endpoint", "junction", "uncertainty"):
+            if all(optional in p for p in preds):
+                keys.append(optional)
+        mean = {key: sum(q[key] for q in preds) / len(preds) for key in keys}
+
         if "orientation" in preds[0]:
             orientation = sum(q["orientation"] for q in preds) / len(preds)
             norm = np.linalg.norm(orientation, axis=0, keepdims=True)
@@ -59,7 +75,7 @@ def main():
 
         masks = reconstruct_instances(
             mean["region"], mean["centerline"], mean["boundary"], mean["distance"],
-            orientation=mean.get("orientation"), **inf,
+            orientation=mean.get("orientation"), width=mean.get("width"), **inf,
         )
         for i, mask in enumerate(masks, 1):
             rows.append({"filament_id": f"{path.stem}_{i}", "segmentation_rle": assert_roundtrip(mask)})

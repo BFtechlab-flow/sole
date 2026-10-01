@@ -1,0 +1,49 @@
+name: FILA-Net Real Sun + SSL Smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  PYTHONPATH: .
+
+jobs:
+  real-sun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.16"
+          cache: pip
+      - name: Install pinned dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Download a real NOAA/GONG H-alpha observation and run FILA preprocessing
+        run: |
+          python scripts/real_sun_demo.py --output-dir artifacts/real_sun
+      - name: Start rule-safe self-supervised GONG warm-up
+        run: |
+          python scripts/pretrain_gong_ssl.py \
+            --output artifacts/pretrain/gong_ssl_encoder.pt \
+            --epochs 1 \
+            --steps-per-epoch 2 \
+            --minutes 0 \
+            --max-images 1 \
+            --image-size 192
+      - name: Upload real-Sun proof + warm-up checkpoint
+        uses: actions/upload-artifact@v4
+        with:
+          name: filanet-real-sun-smoke
+          path: |
+            artifacts/real_sun/gong_real_halpha.fits.fz
+            artifacts/real_sun/gong_real_halpha.jpg
+            artifacts/real_sun/real_sun_preprocessing.png
+            artifacts/real_sun/real_sun_channels.npz
+            artifacts/real_sun/source_url.txt
+            artifacts/pretrain/gong_ssl_encoder.pt
+          if-no-files-found: error

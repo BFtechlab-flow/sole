@@ -5,7 +5,18 @@ from pathlib import Path
 import numpy as np
 
 
-PREDICTION_KEYS = ("region", "centerline", "boundary", "distance", "orientation")
+PREDICTION_KEYS = (
+    "region",
+    "centerline",
+    "boundary",
+    "distance",
+    "orientation",
+    "width",
+    "curvature",
+    "endpoint",
+    "junction",
+    "uncertainty",
+)
 
 
 def cache_path(cache_dir, fold: int, file_name: str) -> Path:
