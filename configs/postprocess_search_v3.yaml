@@ -1,0 +1,8 @@
+max_candidates: 96
+space:
+  bridge_geodesic: [false, true]
+  bridge_geodesic_region_weight: [1.0, 2.0, 3.0]
+  bridge_geodesic_boundary_weight: [2.0, 3.0, 5.0]
+  bridge_max_geodesic_ratio: [1.4, 1.8, 2.2]
+  bridge_min_embedding_similarity: [0.0, 0.15, 0.30]
+  bridge_embedding_weight: [0.0, 0.35, 0.70]
