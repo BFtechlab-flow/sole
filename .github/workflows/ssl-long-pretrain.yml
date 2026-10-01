@@ -1,0 +1,60 @@
+name: FILA-Net Long GONG SSL Pretraining
+
+on:
+  workflow_dispatch:
+
+env:
+  PYTHONPATH: .
+
+jobs:
+  long-ssl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11.16"
+          cache: pip
+      - name: Install pinned dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Long ImageNet to GONG adaptation
+        run: |
+          python scripts/pretrain_gong_ssl.py \
+            --imagenet-pretrained \
+            --output artifacts/pretrain/gong_ssl_long.pt \
+            --manifest artifacts/pretrain/gong_ssl_long.json \
+            --max-images 18 \
+            --min-images 12 \
+            --epochs 8 \
+            --steps-per-epoch 40 \
+            --image-size 256 \
+            --lr 0.0001 \
+            --seed 2026
+      - name: Verify strict transfer into FILA-Net
+        run: |
+          python - <<'PY'
+          import torch
+          from src.model import FILANet
+          from src.ssl_pretrain import load_ssl_encoder
+          p='artifacts/pretrain/gong_ssl_long.pt'
+          ck=torch.load(p,map_location='cpu')
+          assert ck.get('initialization') == 'imagenet'
+          assert ck.get('images', 0) >= 12
+          assert ck.get('completed_steps', 0) == 320
+          m=FILANet(ck['encoder_name'],False,128,4,advanced={'enabled':True})
+          load_ssl_encoder(m,ck,strict=True)
+          print('long ImageNet -> GONG -> FILA-Net strict transfer: OK')
+          print('loss_history=',ck.get('loss_history'))
+          PY
+      - name: Upload long-pretraining checkpoint
+        uses: actions/upload-artifact@v6
+        with:
+          name: filanet-gong-ssl-long
+          path: |
+            artifacts/pretrain/gong_ssl_long.pt
+            artifacts/pretrain/gong_ssl_long.json
+          if-no-files-found: error
+          retention-days: 90

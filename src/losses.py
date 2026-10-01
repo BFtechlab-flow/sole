@@ -1,6 +1,8 @@
 import torch
 import torch.nn.functional as F
 
+from .topology import h0_persistence_loss
+
 
 def dice(logits, target, eps=1e-6):
     p = torch.sigmoid(logits)
@@ -49,11 +51,7 @@ def cldice_loss(logits, target, iterations=10, eps=1e-6):
 
 
 def centerline_ce_loss(logits, target, iterations=8):
-    """Innovation #8: CE focused on topologically critical centerline pixels.
-
-    This is a lightweight centerline-weighted CE inspired by recent clCE-style
-    vessel work. It intentionally does not claim to reproduce any paper verbatim.
-    """
+    """CE focused on topologically critical centerline pixels."""
     base = F.binary_cross_entropy_with_logits(logits, target, reduction="none")
     pred_skel = soft_skeletonize(torch.sigmoid(logits), iterations).detach()
     true_skel = soft_skeletonize(target, iterations)
@@ -87,12 +85,7 @@ def sparse_focal_bce(logits, target, gamma=2.0, alpha=0.75):
 
 
 def radius_balance_loss(center_logits, center_target, width_target, width_valid, eps=1e-6):
-    """Innovation #9: give thin and thick filament centerlines comparable influence.
-
-    Width is normalized physical diameter derived from raw EDT. Thin centerline
-    pixels receive larger weights, countering the tendency of overlap losses to
-    prioritize broad structures.
-    """
+    """Give thin and thick filament centerlines comparable influence."""
     bce = F.binary_cross_entropy_with_logits(center_logits, center_target, reduction="none")
     valid = width_valid.float()
     inv_radius = 1.0 / (0.08 + width_target.detach())
@@ -101,12 +94,73 @@ def radius_balance_loss(center_logits, center_target, width_target, width_valid,
 
 
 def uncertainty_region_loss(region_logits, target, uncertainty_raw):
-    """Innovation #10: heteroscedastic region loss for annotation/image ambiguity."""
+    """Heteroscedastic region loss for annotation/image ambiguity."""
     pixel_bce = F.binary_cross_entropy_with_logits(region_logits, target, reduction="none")
     log_var = torch.clamp(uncertainty_raw, -4.0, 4.0)
     precision = torch.exp(-log_var)
     loss = precision * pixel_bce + 0.5 * log_var + 0.0025 * log_var.square()
     return loss.mean()
+
+
+def discriminative_instance_loss(
+    embedding,
+    instance_id,
+    delta_var=0.5,
+    delta_dist=1.5,
+    reg_weight=1e-3,
+    max_pixels_per_instance=2048,
+):
+    """Proposal-free discriminative embedding loss for filament instances.
+
+    Pixels from the same GT filament are pulled toward an instance mean; means
+    from different filaments are pushed apart. Background id=0 is ignored.
+    Pixel sampling is deterministic and caps memory on 1024x1024 patches.
+    """
+    if embedding.ndim != 4 or instance_id.ndim != 4:
+        raise ValueError("embedding and instance_id must be BxCxHxW and Bx1xHxW")
+    if instance_id.shape[1] != 1 or embedding.shape[-2:] != instance_id.shape[-2:]:
+        raise ValueError("instance_id shape must match embedding spatial dimensions")
+
+    batch_losses = []
+    for b in range(embedding.shape[0]):
+        emb = embedding[b]
+        ids = instance_id[b, 0].long()
+        unique_ids = torch.unique(ids)
+        unique_ids = unique_ids[unique_ids > 0]
+        if unique_ids.numel() == 0:
+            batch_losses.append(embedding[b].sum() * 0.0)
+            continue
+
+        centers = []
+        var_terms = []
+        for iid in unique_ids:
+            coords = torch.nonzero(ids == iid, as_tuple=False)
+            if coords.shape[0] > max_pixels_per_instance:
+                pick = torch.linspace(
+                    0,
+                    coords.shape[0] - 1,
+                    steps=max_pixels_per_instance,
+                    device=coords.device,
+                ).long()
+                coords = coords[pick]
+            vectors = emb[:, coords[:, 0], coords[:, 1]].transpose(0, 1)
+            center = vectors.mean(dim=0)
+            centers.append(center)
+            distances = torch.linalg.vector_norm(vectors - center[None], dim=1)
+            var_terms.append(F.relu(distances - float(delta_var)).square().mean())
+
+        centers = torch.stack(centers, dim=0)
+        var_loss = torch.stack(var_terms).mean()
+        if centers.shape[0] > 1:
+            d = torch.cdist(centers, centers)
+            mask = ~torch.eye(centers.shape[0], dtype=torch.bool, device=d.device)
+            dist_loss = F.relu(2.0 * float(delta_dist) - d[mask]).square().mean()
+        else:
+            dist_loss = centers.sum() * 0.0
+        reg_loss = torch.linalg.vector_norm(centers, dim=1).mean()
+        batch_losses.append(var_loss + dist_loss + float(reg_weight) * reg_loss)
+
+    return torch.stack(batch_losses).mean()
 
 
 def total_loss(pred, t, w):
@@ -128,6 +182,14 @@ def total_loss(pred, t, w):
 
     if w.get("topology", 0.0) > 0:
         loss = loss + w["topology"] * cldice_loss(pred["region"], t["region"])
+
+    if w.get("h0_persistence", 0.0) > 0:
+        loss = loss + w["h0_persistence"] * h0_persistence_loss(
+            pred["region"],
+            t["region"],
+            max_size=int(w.get("h0_max_size", 64)),
+            max_features=int(w.get("h0_max_features", 64)),
+        )
 
     if w.get("orientation", 0.0) > 0 and "orientation" in pred:
         loss = loss + w["orientation"] * orientation_loss(
@@ -163,6 +225,15 @@ def total_loss(pred, t, w):
     if w.get("uncertainty_region", 0.0) > 0 and "uncertainty" in pred:
         loss = loss + w["uncertainty_region"] * uncertainty_region_loss(
             pred["region"], t["region"], pred["uncertainty"]
+        )
+
+    if w.get("instance_embedding", 0.0) > 0 and "instance_embedding" in pred:
+        loss = loss + w["instance_embedding"] * discriminative_instance_loss(
+            pred["instance_embedding"],
+            t["instance_id"],
+            delta_var=float(w.get("embedding_delta_var", 0.5)),
+            delta_dist=float(w.get("embedding_delta_dist", 1.5)),
+            max_pixels_per_instance=int(w.get("embedding_max_pixels", 2048)),
         )
 
     return loss

@@ -16,6 +16,7 @@ PREDICTION_KEYS = (
     "endpoint",
     "junction",
     "uncertainty",
+    "instance_embedding",
 )
 
 

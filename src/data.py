@@ -27,6 +27,7 @@ TARGET_KEYS = (
     "curvature_valid",
     "endpoint",
     "junction",
+    "instance_id",
 )
 
 
@@ -166,6 +167,7 @@ def build_targets(r, width_scale_px=64.0):
     curvature_valid = np.zeros((h, w), np.float32)
     endpoint = np.zeros((h, w), np.float32)
     junction = np.zeros((h, w), np.float32)
+    instance_id = np.zeros((h, w), np.int32)
     instances = []
     kernel = np.ones((3, 3), np.uint8)
 
@@ -175,6 +177,12 @@ def build_targets(r, width_scale_px=64.0):
         if not m.any():
             continue
         instances.append(m)
+        current_id = len(instances)
+        # COCO panoptic-style instance supervision should be non-overlapping. If
+        # annotations overlap, preserve the first assignment so one pixel never
+        # receives contradictory embedding labels.
+        assign = (m > 0) & (instance_id == 0)
+        instance_id[assign] = current_id
         region = np.maximum(region, m)
 
         skel = skeletonize(m > 0)
@@ -225,6 +233,7 @@ def build_targets(r, width_scale_px=64.0):
         "curvature_valid": curvature_valid.astype(np.float32),
         "endpoint": endpoint.astype(np.float32),
         "junction": junction.astype(np.float32),
+        "instance_id": instance_id,
         "instances": instances,
     }
 
@@ -312,6 +321,8 @@ class FilamentDataset(Dataset):
             value = cropped[k]
             if k == "orientation":
                 out[k] = torch.from_numpy(value.copy()).float()
+            elif k == "instance_id":
+                out[k] = torch.from_numpy(value[None].copy()).long()
             else:
                 out[k] = torch.from_numpy(value[None].copy()).float()
         return out
