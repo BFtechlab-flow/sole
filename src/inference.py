@@ -44,6 +44,7 @@ def _predict_patch(model, tensor, tta=True):
     optional_summed = {}
     orientation_sum = None
     uncertainty_sum = None
+    embedding_sum = None
 
     for hflip, vflip in transforms:
         aug = _inverse_flip(tensor, hflip=hflip, vflip=vflip)
@@ -71,6 +72,11 @@ def _predict_patch(model, tensor, tta=True):
             ori = _inverse_orientation(ori, hflip=hflip, vflip=vflip)
             orientation_sum = ori if orientation_sum is None else orientation_sum + ori
 
+        if "instance_embedding" in raw:
+            emb = F.normalize(raw["instance_embedding"], dim=1, eps=1e-6)
+            emb = _inverse_flip(emb, hflip=hflip, vflip=vflip)
+            embedding_sum = emb if embedding_sum is None else embedding_sum + emb
+
     scale = 1.0 / len(transforms)
     out = {k: (v * scale)[0, 0].cpu().numpy() for k, v in summed.items()}
     out.update({k: (v * scale)[0, 0].cpu().numpy() for k, v in optional_summed.items()})
@@ -79,6 +85,9 @@ def _predict_patch(model, tensor, tta=True):
     if orientation_sum is not None:
         ori = F.normalize(orientation_sum * scale, dim=1, eps=1e-6)
         out["orientation"] = ori[0].cpu().numpy()
+    if embedding_sum is not None:
+        emb = F.normalize(embedding_sum * scale, dim=1, eps=1e-6)
+        out["instance_embedding"] = emb[0].cpu().numpy()
     return out
 
 
@@ -89,6 +98,7 @@ def predict_tiled(model, x, device, tile=1024, overlap=256, tta=True):
     optional_acc = {}
     orientation_acc = np.zeros((2, h, w), np.float32)
     has_orientation = False
+    embedding_acc = None
     weight = np.zeros((h, w), np.float32)
     win = np.maximum(np.outer(np.hanning(tile), np.hanning(tile)).astype(np.float32), 0.05)
 
@@ -114,6 +124,11 @@ def predict_tiled(model, x, device, tile=1024, overlap=256, tta=True):
                 has_orientation = True
                 orientation_acc[:, y : y + hh, z : z + ww] += out["orientation"] * q[None]
 
+            if "instance_embedding" in out:
+                if embedding_acc is None:
+                    embedding_acc = np.zeros((out["instance_embedding"].shape[0], h, w), np.float32)
+                embedding_acc[:, y : y + hh, z : z + ww] += out["instance_embedding"] * q[None]
+
             weight[y : y + hh, z : z + ww] += q
 
     result = {k: v / np.maximum(weight, 1e-6) for k, v in acc.items()}
@@ -122,4 +137,8 @@ def predict_tiled(model, x, device, tile=1024, overlap=256, tta=True):
         orientation = orientation_acc / np.maximum(weight[None], 1e-6)
         norm = np.linalg.norm(orientation, axis=0, keepdims=True)
         result["orientation"] = orientation / np.maximum(norm, 1e-6)
+    if embedding_acc is not None:
+        embedding = embedding_acc / np.maximum(weight[None], 1e-6)
+        norm = np.linalg.norm(embedding, axis=0, keepdims=True)
+        result["instance_embedding"] = embedding / np.maximum(norm, 1e-6)
     return result
