@@ -2,18 +2,46 @@
 
 Competition-oriented PyTorch pipeline for the **Solar Filament Segmentation Challenge 2026**.
 
-## What this repository contains
+FILA-Net is an instance-reconstruction system for 2048×2048 GONG H-alpha images:
 
-- grouped cross-validation by physical observation
-- multi-head FILA-Net: region, derived centerline, boundary, distance transform
-- segmentation-only supervision: no spine/chirality/bbox metadata used as GT
+`image → multi-head filament fields → topology/orientation reasoning → graph repair → watershed instances → COCO RLE`
+
+## Current capabilities
+
+- leakage-safe grouped 5-fold CV by physical GONG observation
+- independent scoring of every MAGFiLO annotator record
+- ConvNeXt/FPN multi-head predictions: region, centerline, boundary, distance, orientation
+- segmentation-derived auxiliary supervision only
 - clDice-style topology loss
-- full-resolution overlapping tiled inference
-- conservative centerline fragment reconnection
-- marker-controlled watershed instance reconstruction
-- local Panoptic Quality diagnostics
-- TTA and multi-fold ensemble inference
-- COCO compressed RLE with round-trip verification
+- axial orientation field `[cos(2θ), sin(2θ)]`
+- overlapping native-resolution tiled inference
+- flip TTA with correct orientation transforms
+- orientation-aware conservative endpoint graph bridging
+- marker-controlled watershed reconstruction
+- competition-aligned PQ diagnostics with strict `IoU > 0.50`
+- matched IoU/Dice distributions + one-to-many / many-to-one diagnostics
+- OOF prediction cache
+- nested post-processing threshold calibration
+- single-variable ablation orchestration
+- five-fold ensemble inference
+- hard submission/RLE validation + SHA-256 verification
+- end-to-end Jupyter notebook
+- exact pinned Python package versions
+
+## Important metric note
+
+The organizer's public evaluation definition uses Panoptic Quality:
+
+`PQ = Σ IoU(matched pairs) / (TP + 0.5 FP + 0.5 FN)`
+
+with a **strict IoU > 0.50** instance match. MAGFiLO has multiple independent
+annotation records for some physical images, so one prediction set is evaluated
+against each annotation record separately. `src/pq_official.py` implements these
+published semantics and exposes both macro and micro summaries.
+
+The organizer's **Self Evaluation notebook is the final authority** if its
+implementation changes:
+https://www.kaggle.com/code/azimahmadzadeh/self-evaluation-notebook
 
 ## Expected dataset layout
 
@@ -26,42 +54,147 @@ MAGFiLO_1.0_Kaggle_2026/
     └── test_images/
 ```
 
-Edit `data.root` in `configs/filanet.yaml`.
+Set `data.root` in `configs/filanet.yaml`.
 
-## Install
+## Environment
+
+Tested CI environment:
+
+- Python 3.11.16
+- exact package versions in `requirements.txt`
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-## Audit data
+## 1. Audit data and folds
 
 ```bash
-python scripts/audit_data.py --config configs/filanet.yaml
+python scripts/audit_data.py \
+  --config configs/filanet.yaml \
+  --strict \
+  --output artifacts/data_audit.json
 ```
 
-## Train
+For a slower complete mask-decode audit add `--decode-all`.
+
+## 2. Train five folds
 
 ```bash
-python scripts/train.py --config configs/filanet.yaml --fold 0
+for FOLD in 0 1 2 3 4; do
+  python scripts/train.py \
+    --config configs/filanet.yaml \
+    --fold "$FOLD" \
+    --output checkpoints
+done
 ```
 
-Repeat for folds 0–4.
+Best checkpoints are selected by macro PQ over the fold's independent
+annotation records, not by training loss.
 
-## Validate
+## 3. Cache OOF predictions
 
 ```bash
-python scripts/validate.py --config configs/filanet.yaml --fold 0 --weights checkpoints/fold0_best.pt
+python scripts/cache_oof.py \
+  --config configs/filanet.yaml \
+  --weights-pattern 'checkpoints/fold{fold}_best.pt' \
+  --cache-dir artifacts/oof_cache
 ```
 
-## Submission
+Each physical image is inferred only once per fold even when several annotators
+labeled it.
+
+## 4. Full OOF evaluation
 
 ```bash
-python scripts/infer.py --config configs/filanet.yaml \
-  --weights checkpoints/fold0_best.pt checkpoints/fold1_best.pt checkpoints/fold2_best.pt checkpoints/fold3_best.pt checkpoints/fold4_best.pt \
+python scripts/evaluate_oof.py \
+  --config configs/filanet.yaml \
+  --cache-dir artifacts/oof_cache \
+  --output artifacts/oof_metrics.json \
+  --records-csv artifacts/oof_records.csv
+```
+
+Outputs include macro/micro PQ, SQ/RQ, TP/FP/FN, matched IoU/Dice
+distributions, fragmentation/merge diagnostics and bootstrap uncertainty.
+
+## 5. Leakage-safe post-processing calibration
+
+```bash
+python scripts/optimize_postprocess.py \
+  --config configs/filanet.yaml \
+  --search-config configs/postprocess_search.yaml \
+  --cache-dir artifacts/oof_cache \
+  --output artifacts/postprocess_search.json \
+  --write-config configs/filanet_tuned.yaml
+```
+
+For every outer fold, the parameter candidate is selected using the **other**
+folds only. The nested score is the number to use when judging whether tuning
+actually transfers.
+
+## 6. Ablations
+
+Generate the campaign without spending GPU time:
+
+```bash
+python scripts/run_ablation.py
+```
+
+Run it on a GPU machine with the official data:
+
+```bash
+python scripts/run_ablation.py --execute
+```
+
+The sequence changes one capability at a time:
+
+`baseline → +topology → +orientation → +graph bridge → +TTA`
+
+Do not keep a feature merely because it sounds sophisticated. Keep it only if
+paired OOF evidence supports it.
+
+## 7. Final ensemble submission
+
+```bash
+python scripts/infer.py \
+  --config configs/filanet_tuned.yaml \
+  --weights \
+    checkpoints/fold0_best.pt \
+    checkpoints/fold1_best.pt \
+    checkpoints/fold2_best.pt \
+    checkpoints/fold3_best.pt \
+    checkpoints/fold4_best.pt \
   --output submission.csv
 ```
 
-## Important
+`infer.py` automatically validates the CSV and writes
+`submission.verification.json`.
 
-Thresholds in the YAML are starting values, not claimed optimal values. Tune them only on leakage-safe OOF predictions. Before a final Kaggle submission, compare `src/metric.py` against the organizers' latest evaluation implementation and align any competition-specific edge cases.
+A standalone gate is also available:
+
+```bash
+python scripts/validate_submission.py submission.csv \
+  --test-images /path/to/MAGFiLO_1.0_Kaggle_2026/test/test_images
+```
+
+## End-to-end notebook
+
+Open:
+
+```text
+notebooks/filanet_end_to_end.ipynb
+```
+
+It walks through audit → five-fold training → OOF → calibration → ablation →
+ensemble inference → submission verification.
+
+## Competition discipline
+
+- Never tune from the public/private leaderboard.
+- Never merge annotators into one validation target for PQ reporting.
+- Never report a feature as an improvement until it survives leakage-safe OOF.
+- Preserve all ablation failures; they are useful evidence for the technical report.
+- Do not use test-set labels or external test-overlapping annotations.
+- Treat `configs/filanet_tuned.yaml` as valid only after it has been generated from OOF caches.
+
+See `docs/experiment_protocol.md` and `docs/final_submission_checklist.md`.

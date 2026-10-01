@@ -1,0 +1,13 @@
+# OOF-only post-processing search.
+# The optimizer reports a nested outer-fold estimate and separately writes the
+# best full-OOF configuration for final training/inference.
+max_candidates: 96
+space:
+  region_threshold: [0.30, 0.38, 0.45, 0.52]
+  center_threshold: [0.25, 0.35, 0.45]
+  min_region_area: [32, 64, 128]
+  min_instance_area: [100, 200, 300, 450]
+  bridge_max_distance: [0, 16, 28]
+  bridge_min_alignment: [0.75, 0.82, 0.90]
+  bridge_min_region: [0.15, 0.25]
+  bridge_max_boundary: [0.65, 0.80]
