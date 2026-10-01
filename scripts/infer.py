@@ -73,9 +73,15 @@ def main():
             norm = np.linalg.norm(orientation, axis=0, keepdims=True)
             mean["orientation"] = orientation / np.maximum(norm, 1e-6)
 
+        if all("instance_embedding" in p for p in preds):
+            embedding = sum(q["instance_embedding"] for q in preds) / len(preds)
+            norm = np.linalg.norm(embedding, axis=0, keepdims=True)
+            mean["instance_embedding"] = embedding / np.maximum(norm, 1e-6)
+
         masks = reconstruct_instances(
             mean["region"], mean["centerline"], mean["boundary"], mean["distance"],
-            orientation=mean.get("orientation"), width=mean.get("width"), **inf,
+            orientation=mean.get("orientation"), width=mean.get("width"),
+            instance_embedding=mean.get("instance_embedding"), **inf,
         )
         for i, mask in enumerate(masks, 1):
             rows.append({"filament_id": f"{path.stem}_{i}", "segmentation_rle": assert_roundtrip(mask)})
