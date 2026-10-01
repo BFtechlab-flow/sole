@@ -1,9 +1,7 @@
 name: FILA-Net Long GONG SSL Pretraining
 
 on:
-  push:
-    branches:
-      - filanet-gong-long-pretrain-20261001
+  workflow_dispatch:
 
 env:
   PYTHONPATH: .
@@ -38,7 +36,6 @@ jobs:
       - name: Verify strict transfer into FILA-Net
         run: |
           python - <<'PY'
-          import json
           import torch
           from src.model import FILANet
           from src.ssl_pretrain import load_ssl_encoder
