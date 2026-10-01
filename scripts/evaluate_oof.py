@@ -48,7 +48,8 @@ def main():
         pred = load_prediction(path)
         predicted_instances = reconstruct_instances(
             pred["region"], pred["centerline"], pred["boundary"], pred["distance"],
-            orientation=pred.get("orientation"), width=pred.get("width"), **inf,
+            orientation=pred.get("orientation"), width=pred.get("width"),
+            instance_embedding=pred.get("instance_embedding"), **inf,
         )
         for idx in record_indices:
             record = records[idx]
