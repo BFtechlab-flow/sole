@@ -7,6 +7,8 @@ from scipy.ndimage import distance_transform_edt
 from skimage.morphology import skeletonize
 from .utils import observation_key
 
+TARGET_KEYS = ("region", "centerline", "boundary", "distance")
+
 def robust_normalize(img):
     x=img.astype(np.float32); lo,hi=np.percentile(x,[1,99])
     return np.clip((x-lo)/(hi-lo+1e-8),0,1)
@@ -48,6 +50,18 @@ def build_targets(r):
     return {"region":region.astype(np.float32),"centerline":center.astype(np.float32),
             "boundary":boundary.astype(np.float32),"distance":distance.astype(np.float32),"instances":instances}
 
+def apply_geometric_transform(image, targets, hflip=False, vflip=False):
+    """Apply one sampled geometric transform identically to image and every target map."""
+    x=image
+    transformed={k:v for k,v in targets.items()}
+    if hflip:
+        x=np.flip(x,axis=-1)
+        transformed={k:np.fliplr(v) for k,v in transformed.items()}
+    if vflip:
+        x=np.flip(x,axis=-2)
+        transformed={k:np.flipud(v) for k,v in transformed.items()}
+    return x.copy(), {k:v.copy() for k,v in transformed.items()}
+
 class FilamentDataset(Dataset):
     def __init__(self,records,image_dir,patch_size=1024,train=True):
         self.records=records; self.image_dir=Path(image_dir); self.patch_size=patch_size; self.train=train
@@ -56,14 +70,20 @@ class FilamentDataset(Dataset):
         r=self.records[idx]; img=cv2.imread(str(self.image_dir/r["file_name"]),cv2.IMREAD_GRAYSCALE)
         if img is None: raise FileNotFoundError(self.image_dir/r["file_name"])
         x=build_input_channels(img); t=build_targets(r); h,w=t["region"].shape; s=min(self.patch_size,h,w)
-        if t["region"].any() and random.random()<.7:
-            ys,xs=np.where(t["region"]>0); j=random.randrange(len(xs)); cy,cx=ys[j],xs[j]
-            y=max(0,min(h-s,int(cy)-s//2)); z=max(0,min(w-s,int(cx)-s//2))
+        if self.train:
+            if t["region"].any() and random.random()<.7:
+                ys,xs=np.where(t["region"]>0); j=random.randrange(len(xs)); cy,cx=ys[j],xs[j]
+                y=max(0,min(h-s,int(cy)-s//2)); z=max(0,min(w-s,int(cx)-s//2))
+            else:
+                y=random.randint(0,max(h-s,0)); z=random.randint(0,max(w-s,0))
         else:
-            y=random.randint(0,max(h-s,0)); z=random.randint(0,max(w-s,0))
-        x=x[:,y:y+s,z:z+s]; out={"image":torch.from_numpy(x).float()}
-        for k in ("region","centerline","boundary","distance"):
-            a=t[k][y:y+s,z:z+s]
-            if self.train and random.random()<.5: a=np.fliplr(a).copy()
-            out[k]=torch.from_numpy(a[None].copy()).float()
+            y=max((h-s)//2,0); z=max((w-s)//2,0)
+        x=x[:,y:y+s,z:z+s]
+        cropped={k:t[k][y:y+s,z:z+s] for k in TARGET_KEYS}
+        if self.train:
+            hflip=random.random()<.5
+            x,cropped=apply_geometric_transform(x,cropped,hflip=hflip)
+        out={"image":torch.from_numpy(x).float()}
+        for k in TARGET_KEYS:
+            out[k]=torch.from_numpy(cropped[k][None].copy()).float()
         return out
