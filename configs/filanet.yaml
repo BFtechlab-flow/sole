@@ -14,10 +14,13 @@ train:
   patch_size: 1024
   epochs: 25
   batch_size: 2
+  val_batch_size: 2
   workers: 4
   lr: 0.0002
   weight_decay: 0.0001
   amp: true
+  val_interval: 1
+  validation_tta: false
 loss:
   region_bce: 0.25
   region_dice: 0.30
