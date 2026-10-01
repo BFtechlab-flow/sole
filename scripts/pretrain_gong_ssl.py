@@ -82,6 +82,8 @@ def main():
         arrays.append(build_input_channels(gray))
         valid_urls.append(url)
 
+    initialization = "imagenet" if args.imagenet_pretrained else "random"
+    print(f"SSL encoder initialization={initialization}")
     model = MaskedSolarAutoencoder(args.encoder, pretrained=args.imagenet_pretrained).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     history = []
@@ -100,6 +102,7 @@ def main():
         step_history = list(checkpoint.get("step_loss_history", []))
         start_epoch = int(checkpoint.get("completed_epochs", 0))
         completed_steps = int(checkpoint.get("completed_steps", 0))
+        initialization = checkpoint.get("initialization", initialization)
         print(f"resumed SSL from {args.resume} epochs={start_epoch} steps={completed_steps}")
 
     model.train()
@@ -137,12 +140,13 @@ def main():
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "schema_version": 2,
+        "schema_version": 3,
         "encoder": model.encoder.state_dict(),
         "model": model.state_dict(),
         "optimizer": opt.state_dict(),
         "encoder_name": args.encoder,
         "input_channels": 4,
+        "initialization": initialization,
         "source": "public NOAA/SWPC GONG H-alpha FITS; no external ground-truth labels",
         "source_urls": valid_urls,
         "images": len(arrays),
