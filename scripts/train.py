@@ -71,6 +71,7 @@ def validate_pq(model, records, image_dir, device, config):
             pred["distance"],
             orientation=pred.get("orientation"),
             width=pred.get("width"),
+            instance_embedding=pred.get("instance_embedding"),
             **inf,
         )
         for record in annotation_records:
@@ -210,7 +211,7 @@ def main():
             best_pq = metrics["pq"]
             torch.save(
                 {
-                    "schema_version": 2,
+                    "schema_version": 3,
                     "model": model.state_dict(), "config": cfg, "fold": args.fold,
                     "group_mode": mode, "epoch": epoch, "train_loss": train_avg,
                     "validation_loss": val_avg, "pq": metrics["pq"],
