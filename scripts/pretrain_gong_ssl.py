@@ -1,49 +1,32 @@
 import argparse
 import random
-import time
-import urllib.request
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import cv2
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import timm
 
 from src.data import build_input_channels
-
-
-def gong_urls(center="20111216103234", site="C", minutes=12):
-    t0 = datetime.strptime(center, "%Y%m%d%H%M%S")
-    urls = []
-    for delta in range(-minutes, minutes + 1):
-        t = t0 + timedelta(minutes=delta)
-        stamp = t.strftime("%Y%m%d%H%M%S")
-        ym = t.strftime("%Y%m")
-        ymd = t.strftime("%Y%m%d")
-        urls.append(f"https://gong2.nso.edu/ftp/HA/has/{ym}/{ymd}/{stamp[:-2]}34{site}h.jpg")
-    return urls
+from src.gong import discover_halpha_urls, download_url, load_halpha_uint8
 
 
 def download_many(urls, out_dir, minimum=1):
     out_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     for i, url in enumerate(urls):
-        path = out_dir / f"gong_{i:03d}.jpg"
+        path = out_dir / f"gong_{i:03d}.fits.fz"
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "FILA-Net SSL research"})
-            with urllib.request.urlopen(req, timeout=12) as response:
-                path.write_bytes(response.read())
-            if cv2.imread(str(path), cv2.IMREAD_GRAYSCALE) is not None:
-                paths.append(path)
-        except Exception:
+            download_url(url, path, retries=2, timeout=30)
+            _ = load_halpha_uint8(path)
+            paths.append(path)
+        except Exception as exc:
+            print(f"skip {url}: {exc}")
             if path.exists():
                 path.unlink()
-        time.sleep(0.05)
     if len(paths) < minimum:
-        raise RuntimeError(f"only {len(paths)} GONG images downloaded; need >= {minimum}")
+        raise RuntimeError(f"only {len(paths)} NOAA GONG images downloaded; need >= {minimum}")
     return paths
 
 
@@ -105,7 +88,7 @@ def main():
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--steps-per-epoch", type=int, default=12)
     ap.add_argument("--image-size", type=int, default=256)
-    ap.add_argument("--minutes", type=int, default=10)
+    ap.add_argument("--minutes", type=int, default=3, help="Legacy compatibility; controls image count when --max-images is omitted")
     ap.add_argument("--max-images", type=int, default=None)
     ap.add_argument("--lr", type=float, default=2e-4)
     args = ap.parse_args()
@@ -113,13 +96,12 @@ def main():
     torch.manual_seed(2026)
     random.seed(2026)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    urls = gong_urls(minutes=args.minutes)
-    if args.max_images is not None:
-        urls = urls[: max(1, int(args.max_images))]
+    count = int(args.max_images) if args.max_images is not None else max(1, 2 * int(args.minutes) + 1)
+    urls = discover_halpha_urls(limit=count)
     paths = download_many(urls, Path(args.cache_dir), minimum=1)
     arrays = []
     for path in paths:
-        gray = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        gray = load_halpha_uint8(path)
         gray = cv2.resize(gray, (args.image_size, args.image_size), interpolation=cv2.INTER_AREA)
         arrays.append(build_input_channels(gray))
 
@@ -155,7 +137,8 @@ def main():
             "encoder": model.encoder.state_dict(),
             "encoder_name": args.encoder,
             "input_channels": 4,
-            "source": "public GONG H-alpha small JPEGs; no external ground-truth labels",
+            "source": "public NOAA/SWPC GONG H-alpha FITS; no external ground-truth labels",
+            "source_urls": urls,
             "images": len(arrays),
             "loss_history": history,
         },
