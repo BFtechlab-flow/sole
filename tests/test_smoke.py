@@ -68,7 +68,16 @@ def test_model_forward_cpu():
     x = torch.randn(1, 4, 128, 128)
     with torch.no_grad():
         out = model(x)
-    assert set(out) == {"region", "centerline", "boundary", "distance"}
-    for value in out.values():
-        assert value.shape == (1, 1, 128, 128)
-        assert torch.isfinite(value).all()
+
+    assert set(out) == {
+        "region",
+        "centerline",
+        "boundary",
+        "distance",
+        "orientation",
+    }
+    for key in ("region", "centerline", "boundary", "distance"):
+        assert out[key].shape == (1, 1, 128, 128)
+        assert torch.isfinite(out[key]).all()
+    assert out["orientation"].shape == (1, 2, 128, 128)
+    assert torch.isfinite(out["orientation"]).all()
