@@ -1,6 +1,4 @@
 import argparse
-import time
-import urllib.request
 from pathlib import Path
 
 import cv2
@@ -8,22 +6,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from src.data import build_input_channels
-
-
-def download(url, path, retries=4):
-    headers = {"User-Agent": "FILA-Net/1.0 research demo"}
-    last = None
-    for attempt in range(retries):
-        try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=30) as response:
-                data = response.read()
-            path.write_bytes(data)
-            return
-        except Exception as exc:
-            last = exc
-            time.sleep(2 ** attempt)
-    raise RuntimeError(f"failed to download {url}: {last}")
+from src.gong import discover_halpha_urls, download_url, load_halpha_uint8
 
 
 def panel(title, arr, size=420):
@@ -41,25 +24,26 @@ def panel(title, arr, size=420):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument(
-        "--url",
-        default="https://gong2.nso.edu/ftp/HA/has/201112/20111216/20111216103234Ch.jpg",
-    )
+    ap.add_argument("--url", default=None, help="Optional direct NOAA GONG .fits.fz URL")
     ap.add_argument("--output-dir", default="artifacts/real_sun")
     args = ap.parse_args()
 
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
+    url = args.url or discover_halpha_urls(limit=1)[0]
+    raw_path = out / "gong_real_halpha.fits.fz"
     image_path = out / "gong_real_halpha.jpg"
-    download(args.url, image_path)
+    download_url(url, raw_path)
 
-    gray = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
-    if gray is None:
-        raise RuntimeError("downloaded file is not a readable image")
+    gray = load_halpha_uint8(raw_path)
+    if gray.shape[0] < 512 or gray.shape[1] < 512:
+        raise RuntimeError(f"unexpectedly small GONG H-alpha frame: {gray.shape}")
+    if not cv2.imwrite(str(image_path), gray):
+        raise RuntimeError("failed to save GONG preview image")
     x = build_input_channels(gray)
 
     panels = [
-        panel("REAL GONG H-alpha", gray),
+        panel("REAL NOAA/GONG H-alpha", gray),
         panel("raw normalized", x[0]),
         panel("CLAHE", x[1]),
         panel("ridge", x[2]),
@@ -72,8 +56,10 @@ def main():
         sheet.paste(p, (i * w, 0))
     sheet.save(out / "real_sun_preprocessing.png")
 
-    np.savez_compressed(out / "real_sun_channels.npz", image=x.astype(np.float32))
-    print(f"downloaded={image_path} shape={gray.shape} min={gray.min()} max={gray.max()}")
+    np.savez_compressed(out / "real_sun_channels.npz", image=x.astype(np.float32), source_url=np.array(url))
+    (out / "source_url.txt").write_text(url + "\n", encoding="utf-8")
+    print(f"source={url}")
+    print(f"downloaded={raw_path} shape={gray.shape} min={gray.min()} max={gray.max()}")
     print(out / "real_sun_preprocessing.png")
 
 
