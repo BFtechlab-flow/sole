@@ -89,6 +89,11 @@ def main():
     ap.add_argument("--execute", action="store_true")
     ap.add_argument("--folds", nargs="*", type=int, default=None)
     ap.add_argument("--epochs", type=int, default=None)
+    ap.add_argument(
+        "--encoder-weights",
+        default=None,
+        help="optional shared GONG SSL checkpoint; keeps initialization constant across all innovation variants",
+    )
     args = ap.parse_args()
 
     base = load_yaml(args.config)
@@ -112,6 +117,8 @@ def main():
             ]
             if args.epochs is not None:
                 cmd += ["--epochs", str(args.epochs)]
+            if args.encoder_weights:
+                cmd += ["--encoder-weights", str(args.encoder_weights)]
             commands.append(cmd)
         commands.append([
             sys.executable, "scripts/cache_oof.py", "--config", str(cfg_path),
@@ -128,6 +135,7 @@ def main():
             "single_change": delta,
             "config": str(cfg_path),
             "metrics": str(metrics_path),
+            "encoder_weights": args.encoder_weights,
             "commands": commands,
         })
         if args.execute:
