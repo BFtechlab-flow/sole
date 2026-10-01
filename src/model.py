@@ -155,7 +155,6 @@ class FILANet(nn.Module):
         self.orientation_head = nn.Conv2d(fpn_channels, 2, 1)
 
         if self.advanced_enabled:
-            # Innovations #4-#7 and #10 can be ablated independently.
             mapping = {
                 "width": "width_head",
                 "curvature": "curvature_head",
@@ -168,6 +167,12 @@ class FILANet(nn.Module):
                 for name, flag in mapping.items()
                 if bool(self.advanced.get(flag, True))
             })
+            self.instance_embedding_head = None
+            if bool(self.advanced.get("instance_embedding_head", False)):
+                dim = int(self.advanced.get("instance_embedding_dim", 8))
+                if dim < 2:
+                    raise ValueError("instance_embedding_dim must be >= 2")
+                self.instance_embedding_head = nn.Conv2d(fpn_channels, dim, 1)
 
     def forward(self, x):
         size = x.shape[-2:]
@@ -208,4 +213,6 @@ class FILANet(nn.Module):
         out["orientation"] = self.orientation_head(z)
         if self.advanced_enabled:
             out.update({k: h(z) for k, h in self.advanced_heads.items()})
+            if self.instance_embedding_head is not None:
+                out["instance_embedding"] = self.instance_embedding_head(z)
         return out
