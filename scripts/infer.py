@@ -1,4 +1,5 @@
 import argparse
+import json
 from pathlib import Path
 
 import cv2
@@ -11,70 +12,72 @@ from src.inference import predict_tiled
 from src.model import FILANet
 from src.reconstruct import reconstruct_instances
 from src.rle import assert_roundtrip
+from src.submission import save_verification, validate_submission_frame
 from src.utils import image_files, load_yaml, resolve_path
 
 
-ap = argparse.ArgumentParser()
-ap.add_argument("--config", default="configs/filanet.yaml")
-ap.add_argument("--weights", nargs="+", required=True)
-ap.add_argument("--output", default="submission.csv")
-a = ap.parse_args()
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", default="configs/filanet.yaml")
+    ap.add_argument("--weights", nargs="+", required=True)
+    ap.add_argument("--output", default="submission.csv")
+    ap.add_argument("--skip-validation", action="store_true")
+    args = ap.parse_args()
 
-c = load_yaml(a.config)
-device = "cuda" if torch.cuda.is_available() else "cpu"
-models = []
+    cfg = load_yaml(args.config)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    models = []
+    for weights in args.weights:
+        ck = torch.load(weights, map_location=device)
+        model = FILANet(cfg["model"]["encoder"], False, cfg["model"]["fpn_channels"], 4).to(device)
+        model.load_state_dict(ck["model"])
+        model.eval()
+        models.append(model)
 
-for w in a.weights:
-    ck = torch.load(w, map_location=device)
-    model = FILANet(
-        c["model"]["encoder"],
-        False,
-        c["model"]["fpn_channels"],
-        4,
-    ).to(device)
-    model.load_state_dict(ck["model"])
-    model.eval()
-    models.append(model)
+    root = Path(cfg["data"]["root"])
+    test_dir = resolve_path(root, cfg["data"]["test_images"])
+    rows = []
+    image_shapes = {}
+    inf = cfg["inference"]
 
-root = Path(c["data"]["root"])
-rows = []
-inf = c["inference"]
+    paths = image_files(test_dir)
+    for pos, path in enumerate(paths, 1):
+        image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if image is None:
+            raise FileNotFoundError(path)
+        image_shapes[path.stem] = image.shape
+        x = build_input_channels(image)
+        preds = [predict_tiled(m, x, device, inf["tile"], inf["overlap"], inf["tta"]) for m in models]
+        mean = {
+            key: sum(q[key] for q in preds) / len(preds)
+            for key in ("region", "centerline", "boundary", "distance")
+        }
+        if "orientation" in preds[0]:
+            orientation = sum(q["orientation"] for q in preds) / len(preds)
+            norm = np.linalg.norm(orientation, axis=0, keepdims=True)
+            mean["orientation"] = orientation / np.maximum(norm, 1e-6)
 
-for path in image_files(resolve_path(root, c["data"]["test_images"])):
-    im = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
-    x = build_input_channels(im)
-    preds = [
-        predict_tiled(m, x, device, inf["tile"], inf["overlap"], inf["tta"])
-        for m in models
-    ]
-
-    mean = {
-        k: sum(q[k] for q in preds) / len(preds)
-        for k in ("region", "centerline", "boundary", "distance")
-    }
-    if "orientation" in preds[0]:
-        orientation = sum(q["orientation"] for q in preds) / len(preds)
-        norm = np.linalg.norm(orientation, axis=0, keepdims=True)
-        mean["orientation"] = orientation / np.maximum(norm, 1e-6)
-
-    masks = reconstruct_instances(
-        mean["region"],
-        mean["centerline"],
-        mean["boundary"],
-        mean["distance"],
-        orientation=mean.get("orientation"),
-        **inf,
-    )
-    for i, mask in enumerate(masks, 1):
-        rows.append(
-            {
-                "filament_id": f"{path.stem}_{i}",
-                "segmentation_rle": assert_roundtrip(mask),
-            }
+        masks = reconstruct_instances(
+            mean["region"], mean["centerline"], mean["boundary"], mean["distance"],
+            orientation=mean.get("orientation"), **inf,
         )
+        for i, mask in enumerate(masks, 1):
+            rows.append({"filament_id": f"{path.stem}_{i}", "segmentation_rle": assert_roundtrip(mask)})
+        if pos % 10 == 0 or pos == len(paths):
+            print(f"inference {pos}/{len(paths)} images; rows={len(rows)}")
 
-pd.DataFrame(
-    rows,
-    columns=["filament_id", "segmentation_rle"],
-).to_csv(a.output, index=False)
-print("saved", a.output, len(rows))
+    frame = pd.DataFrame(rows, columns=["filament_id", "segmentation_rle"])
+    frame.to_csv(args.output, index=False)
+    print("saved", args.output, len(rows))
+
+    if not args.skip_validation:
+        report = validate_submission_frame(frame, image_shapes, require_nonoverlap=True)
+        verification = str(Path(args.output).with_suffix(".verification.json"))
+        report = save_verification(report, args.output, verification)
+        print(json.dumps(report, indent=2))
+        if not report["ok"]:
+            raise SystemExit("submission validation failed")
+
+
+if __name__ == "__main__":
+    main()
