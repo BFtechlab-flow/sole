@@ -1,7 +1,6 @@
-# OOF-only post-processing search.
-# The optimizer reports a nested outer-fold estimate and separately writes the
-# best full-OOF configuration for final training/inference.
-max_candidates: 96
+# OOF-only post-processing search. Keep candidate count bounded because each
+# candidate reconstructs all OOF images.
+max_candidates: 128
 space:
   region_threshold: [0.30, 0.38, 0.45, 0.52]
   center_threshold: [0.25, 0.35, 0.45]
@@ -11,3 +10,5 @@ space:
   bridge_min_alignment: [0.75, 0.82, 0.90]
   bridge_min_region: [0.15, 0.25]
   bridge_max_boundary: [0.65, 0.80]
+  bridge_max_width_ratio: [1.8, 2.5, 4.0]
+  bridge_width_weight: [0.0, 0.35, 0.70]

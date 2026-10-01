@@ -48,30 +48,18 @@ def main():
         pred = load_prediction(path)
         predicted_instances = reconstruct_instances(
             pred["region"], pred["centerline"], pred["boundary"], pred["distance"],
-            orientation=pred.get("orientation"), **inf,
+            orientation=pred.get("orientation"), width=pred.get("width"), **inf,
         )
         for idx in record_indices:
             record = records[idx]
-            score = pq_score(
-                build_instances(record), predicted_instances,
-                threshold=threshold, relation_threshold=relation_threshold,
-            )
+            score = pq_score(build_instances(record), predicted_instances, threshold=threshold, relation_threshold=relation_threshold)
             scores.append(score)
             rows.append({
-                "record_index": idx,
-                "image_id": record["image_id"],
-                "file_name": record["file_name"],
-                "fold": fold,
-                "pq": score["pq"],
-                "sq": score["sq"],
-                "rq": score["rq"],
-                "tp": score["tp"],
-                "fp": score["fp"],
-                "fn": score["fn"],
-                "one_to_many": score["one_to_many"],
-                "many_to_one": score["many_to_one"],
-                "gt_count": score["gt_count"],
-                "pred_count": score["pred_count"],
+                "record_index": idx, "image_id": record["image_id"], "file_name": record["file_name"],
+                "fold": fold, "pq": score["pq"], "sq": score["sq"], "rq": score["rq"],
+                "tp": score["tp"], "fp": score["fp"], "fn": score["fn"],
+                "one_to_many": score["one_to_many"], "many_to_one": score["many_to_one"],
+                "gt_count": score["gt_count"], "pred_count": score["pred_count"],
             })
         if image_no % 25 == 0 or image_no == total_images:
             print(f"evaluated {image_no}/{total_images} unique OOF images")
@@ -88,20 +76,14 @@ def main():
     aggregate["iou_match_threshold"] = threshold
     aggregate["relation_iou_threshold"] = relation_threshold
 
-    out = Path(args.output)
-    out.parent.mkdir(parents=True, exist_ok=True)
+    out = Path(args.output); out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(aggregate, indent=2), encoding="utf-8")
-
-    csv_path = Path(args.records_csv)
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    csv_path = Path(args.records_csv); csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()) if rows else [])
         if rows:
-            writer.writeheader()
-            writer.writerows(rows)
-
+            writer.writeheader(); writer.writerows(rows)
     print(json.dumps(aggregate, indent=2))
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()

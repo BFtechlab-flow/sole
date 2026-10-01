@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 import torch
 from pycocotools import mask as mask_utils
-from scipy.ndimage import distance_transform_edt
+from scipy.ndimage import convolve, distance_transform_edt, gaussian_filter
 from skimage.morphology import skeletonize
 from torch.utils.data import Dataset
 
@@ -21,6 +21,12 @@ TARGET_KEYS = (
     "distance",
     "orientation",
     "orientation_valid",
+    "width",
+    "width_valid",
+    "curvature",
+    "curvature_valid",
+    "endpoint",
+    "junction",
 )
 
 
@@ -54,8 +60,6 @@ def segmentation_to_mask(seg, h, w):
         r = mask_utils.merge(mask_utils.frPyObjects(seg, h, w))
     else:
         r = seg
-    # pycocotools currently emits a NumPy 2.x copy-keyword deprecation from
-    # inside its decoder. Keep the suppression tightly scoped to that call.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
         m = mask_utils.decode(r)
@@ -84,7 +88,7 @@ def load_coco_records(path):
 
 
 def orientation_from_skeleton(skeleton, radius=3):
-    """Return axial tangent field [cos(2θ), sin(2θ)] on valid skeleton pixels."""
+    """Return axial tangent field [cos(2theta), sin(2theta)] on valid skeleton pixels."""
     sk = np.asarray(skeleton, dtype=bool)
     h, w = sk.shape
     ox = np.zeros((h, w), np.float32)
@@ -109,7 +113,46 @@ def orientation_from_skeleton(skeleton, radius=3):
     return np.stack([ox, oy], axis=0), valid
 
 
-def build_targets(r):
+def skeleton_keypoints(skeleton, dilation_radius=2):
+    """Innovations #6/#7: endpoint and junction targets from skeleton graph degree."""
+    sk = np.asarray(skeleton, dtype=bool)
+    neighbors = convolve(
+        sk.astype(np.uint8),
+        np.ones((3, 3), np.uint8),
+        mode="constant",
+        cval=0,
+    ) - sk.astype(np.uint8)
+    endpoint = sk & (neighbors == 1)
+    junction = sk & (neighbors >= 3)
+    if dilation_radius > 0:
+        k = cv2.getStructuringElement(
+            cv2.MORPH_ELLIPSE,
+            (2 * dilation_radius + 1, 2 * dilation_radius + 1),
+        )
+        endpoint = cv2.dilate(endpoint.astype(np.uint8), k) > 0
+        junction = cv2.dilate(junction.astype(np.uint8), k) > 0
+    return endpoint.astype(np.float32), junction.astype(np.float32)
+
+
+def curvature_from_orientation(orientation, valid, sigma=2.0):
+    """Innovation #5: normalized local tangent-change magnitude on the skeleton."""
+    mask = valid.astype(np.float32)
+    if not mask.any():
+        return np.zeros_like(mask), mask
+    smooth = np.zeros_like(orientation)
+    denom = gaussian_filter(mask, sigma=sigma) + 1e-6
+    for c in range(2):
+        smooth[c] = gaussian_filter(orientation[c] * mask, sigma=sigma) / denom
+    norm = np.linalg.norm(smooth, axis=0)
+    good = (mask > 0) & (norm > 1e-6)
+    smooth[:, good] /= norm[good]
+    dot = np.clip(np.sum(orientation * smooth, axis=0), -1.0, 1.0)
+    curvature = np.zeros_like(mask)
+    curvature[good] = np.arccos(dot[good]) / np.pi
+    return curvature.astype(np.float32), good.astype(np.float32)
+
+
+def build_targets(r, width_scale_px=64.0):
     h, w = r["height"], r["width"]
     region = np.zeros((h, w), np.uint8)
     center = region.copy()
@@ -117,11 +160,17 @@ def build_targets(r):
     distance = np.zeros((h, w), np.float32)
     orientation_sum = np.zeros((2, h, w), np.float32)
     orientation_count = np.zeros((h, w), np.float32)
+    width = np.zeros((h, w), np.float32)
+    width_valid = np.zeros((h, w), np.float32)
+    curvature = np.zeros((h, w), np.float32)
+    curvature_valid = np.zeros((h, w), np.float32)
+    endpoint = np.zeros((h, w), np.float32)
+    junction = np.zeros((h, w), np.float32)
     instances = []
     kernel = np.ones((3, 3), np.uint8)
 
     for a in r["annotations"]:
-        # Only segmentation GT is consumed. Auxiliary targets are derived.
+        # Only segmentation GT is consumed. All advanced targets are derived from it.
         m = segmentation_to_mask(a["segmentation"], h, w)
         if not m.any():
             continue
@@ -129,22 +178,30 @@ def build_targets(r):
         region = np.maximum(region, m)
 
         skel = skeletonize(m > 0)
-        center = np.maximum(
-            center,
-            cv2.dilate(skel.astype(np.uint8), kernel, iterations=1),
-        )
-        boundary = np.maximum(
-            boundary,
-            cv2.morphologyEx(m, cv2.MORPH_GRADIENT, kernel),
-        )
+        skel_u8 = skel.astype(np.uint8)
+        center = np.maximum(center, cv2.dilate(skel_u8, kernel, iterations=1))
+        boundary = np.maximum(boundary, cv2.morphologyEx(m, cv2.MORPH_GRADIENT, kernel))
 
-        d = distance_transform_edt(m)
-        d = d / (d.max() + 1e-8)
-        distance = np.maximum(distance, d)
+        d_raw = distance_transform_edt(m)
+        d_norm = d_raw / (d_raw.max() + 1e-8)
+        distance = np.maximum(distance, d_norm)
 
-        orientation, valid = orientation_from_skeleton(skel)
-        orientation_sum += orientation * valid[None]
+        ori, valid = orientation_from_skeleton(skel)
+        orientation_sum += ori * valid[None]
         orientation_count += valid
+
+        width_instance = np.clip((2.0 * d_raw) / max(float(width_scale_px), 1e-6), 0.0, 1.0)
+        width_band = cv2.dilate(skel_u8, kernel, iterations=1).astype(bool)
+        width[width_band] = np.maximum(width[width_band], width_instance[width_band])
+        width_valid[width_band] = 1.0
+
+        curv, curv_valid = curvature_from_orientation(ori, valid)
+        curvature = np.maximum(curvature, curv)
+        curvature_valid = np.maximum(curvature_valid, curv_valid)
+
+        ep, jn = skeleton_keypoints(skel)
+        endpoint = np.maximum(endpoint, ep)
+        junction = np.maximum(junction, jn)
 
     orientation_valid = (orientation_count > 0).astype(np.float32)
     orientation = np.zeros_like(orientation_sum)
@@ -162,6 +219,12 @@ def build_targets(r):
         "distance": distance.astype(np.float32),
         "orientation": orientation.astype(np.float32),
         "orientation_valid": orientation_valid,
+        "width": width.astype(np.float32),
+        "width_valid": width_valid.astype(np.float32),
+        "curvature": curvature.astype(np.float32),
+        "curvature_valid": curvature_valid.astype(np.float32),
+        "endpoint": endpoint.astype(np.float32),
+        "junction": junction.astype(np.float32),
         "instances": instances,
     }
 
@@ -189,11 +252,19 @@ def apply_geometric_transform(image, targets, hflip=False, vflip=False):
 
 
 class FilamentDataset(Dataset):
-    def __init__(self, records, image_dir, patch_size=1024, train=True):
+    def __init__(
+        self,
+        records,
+        image_dir,
+        patch_size=1024,
+        train=True,
+        width_scale_px=64.0,
+    ):
         self.records = records
         self.image_dir = Path(image_dir)
         self.patch_size = patch_size
         self.train = train
+        self.width_scale_px = float(width_scale_px)
 
     def __len__(self):
         return len(self.records)
@@ -205,7 +276,7 @@ class FilamentDataset(Dataset):
             raise FileNotFoundError(self.image_dir / r["file_name"])
 
         x = build_input_channels(img)
-        t = build_targets(r)
+        t = build_targets(r, width_scale_px=self.width_scale_px)
         h, w = t["region"].shape
         s = min(self.patch_size, h, w)
 

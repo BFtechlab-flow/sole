@@ -60,17 +60,31 @@ def _axial_alignment(orientation, y, x, line_unit):
     return float(np.sqrt(max(0.0, (1.0 + cos2delta) * 0.5)))
 
 
+def _local_scalar(field, y, x, radius=2):
+    if field is None:
+        return None
+    h, w = field.shape
+    y0, y1 = max(0, y - radius), min(h, y + radius + 1)
+    x0, x1 = max(0, x - radius), min(w, x + radius + 1)
+    values = np.asarray(field[y0:y1, x0:x1], dtype=np.float32)
+    values = values[np.isfinite(values) & (values > 1e-4)]
+    return float(np.median(values)) if values.size else None
+
+
 def bridge_skeleton_fragments(
     skeleton,
     region_prob=None,
     boundary_prob=None,
     orientation=None,
+    width=None,
     max_distance=28,
     min_alignment=0.80,
     min_region=0.20,
     max_boundary=0.75,
+    max_width_ratio=2.5,
+    width_weight=0.35,
 ):
-    """Connect compatible skeleton endpoints using a scored endpoint graph."""
+    """Connect compatible skeleton endpoints using geometry + appearance evidence."""
     sk = np.asarray(skeleton, dtype=bool)
     components = label(sk, connectivity=2)
     endpoints = np.argwhere(find_endpoints(sk))
@@ -83,13 +97,14 @@ def bridge_skeleton_fragments(
     for idx, (y, x) in enumerate(endpoints):
         comp = int(components[y, x])
         tangent = _local_tangent(components == comp, int(y), int(x))
-        endpoint_info.append((idx, int(y), int(x), comp, tangent))
+        local_width = _local_scalar(width, int(y), int(x))
+        endpoint_info.append((idx, int(y), int(x), comp, tangent, local_width))
 
     candidates = []
     for a in range(len(endpoint_info)):
-        ia, ya, xa, ca, ta = endpoint_info[a]
+        ia, ya, xa, ca, ta, wa = endpoint_info[a]
         for b in range(a + 1, len(endpoint_info)):
-            ib, yb, xb, cb, tb = endpoint_info[b]
+            ib, yb, xb, cb, tb, wb = endpoint_info[b]
             if ca == cb:
                 continue
 
@@ -108,13 +123,17 @@ def bridge_skeleton_fragments(
             if min(align_a, align_b) < min_alignment:
                 continue
 
+            width_ratio = 1.0
+            width_penalty = 0.0
+            if wa is not None and wb is not None:
+                width_ratio = max(wa, wb) / max(min(wa, wb), 1e-4)
+                if width_ratio > max_width_ratio:
+                    continue
+                width_penalty = abs(float(np.log(max(wa, 1e-4) / max(wb, 1e-4))))
+
             rr, cc = line(ya, xa, yb, xb)
-            region_mean = (
-                float(np.mean(region_prob[rr, cc])) if region_prob is not None else 1.0
-            )
-            boundary_mean = (
-                float(np.mean(boundary_prob[rr, cc])) if boundary_prob is not None else 0.0
-            )
+            region_mean = float(np.mean(region_prob[rr, cc])) if region_prob is not None else 1.0
+            boundary_mean = float(np.mean(boundary_prob[rr, cc])) if boundary_prob is not None else 0.0
             if region_mean < min_region or boundary_mean > max_boundary:
                 continue
 
@@ -123,9 +142,10 @@ def bridge_skeleton_fragments(
                 + 0.5 * ((1.0 - align_a) + (1.0 - align_b))
                 + 0.5 * (1.0 - region_mean)
                 + 0.5 * boundary_mean
+                + width_weight * width_penalty
             )
             candidates.append(
-                (score, ia, ib, ca, cb, rr, cc, dist, align_a, align_b)
+                (score, ia, ib, ca, cb, rr, cc, dist, align_a, align_b, width_ratio)
             )
 
     candidates.sort(key=lambda item: item[0])
@@ -144,7 +164,7 @@ def bridge_skeleton_fragments(
 
     used_endpoints = set()
     accepted = []
-    for score, ia, ib, ca, cb, rr, cc, dist, aa, ab in candidates:
+    for score, ia, ib, ca, cb, rr, cc, dist, aa, ab, wr in candidates:
         if ia in used_endpoints or ib in used_endpoints:
             continue
         if find_root(ca) == find_root(cb):
@@ -157,6 +177,7 @@ def bridge_skeleton_fragments(
                 "distance": float(dist),
                 "alignment_a": float(aa),
                 "alignment_b": float(ab),
+                "width_ratio": float(wr),
                 "score": float(score),
             }
         )
@@ -170,6 +191,7 @@ def reconstruct_instances(
     boundary,
     distance,
     orientation=None,
+    width=None,
     region_threshold=0.45,
     center_threshold=0.35,
     min_region_area=64,
@@ -178,12 +200,12 @@ def reconstruct_instances(
     bridge_min_alignment=0.80,
     bridge_min_region=0.20,
     bridge_max_boundary=0.75,
+    bridge_max_width_ratio=2.5,
+    bridge_width_weight=0.35,
     **kwargs,
 ):
     fg = remove_small_components(region > region_threshold, min_region_area)
-    seeds = skeletonize(
-        closing((center > center_threshold) & fg, footprint=disk(1))
-    )
+    seeds = skeletonize(closing((center > center_threshold) & fg, footprint=disk(1)))
 
     if seeds.any() and bridge_max_distance > 0:
         seeds, bridge_mask, _ = bridge_skeleton_fragments(
@@ -191,10 +213,13 @@ def reconstruct_instances(
             region_prob=region,
             boundary_prob=boundary,
             orientation=orientation,
+            width=width,
             max_distance=bridge_max_distance,
             min_alignment=bridge_min_alignment,
             min_region=bridge_min_region,
             max_boundary=bridge_max_boundary,
+            max_width_ratio=bridge_max_width_ratio,
+            width_weight=bridge_width_weight,
         )
         if bridge_mask.any():
             fg = fg | dilation(bridge_mask, footprint=disk(1))

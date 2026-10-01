@@ -24,11 +24,16 @@ def sha256_file(path):
 
 
 def resolve_tta(args, cfg):
-    if args.tta == "on":
-        return True
-    if args.tta == "off":
-        return False
+    if args.tta == "on": return True
+    if args.tta == "off": return False
     return bool(cfg["inference"].get("tta", True))
+
+
+def build_model(cfg, device):
+    return FILANet(
+        cfg["model"]["encoder"], False, cfg["model"]["fpn_channels"], 4,
+        advanced=cfg["model"].get("advanced", {}),
+    ).to(device)
 
 
 def main():
@@ -55,47 +60,31 @@ def main():
     inf = cfg["inference"]
     use_tta = resolve_tta(args, cfg)
 
-    manifest = {
-        "config": args.config,
-        "group_mode": mode,
-        "tta": use_tta,
-        "device": device,
-        "folds": {},
-    }
-
+    manifest = {"config": args.config, "group_mode": mode, "tta": use_tta, "device": device, "folds": {}}
     for fold in selected:
         weights = Path(args.weights_pattern.format(fold=fold))
-        if not weights.exists():
-            raise FileNotFoundError(weights)
+        if not weights.exists(): raise FileNotFoundError(weights)
         checkpoint = torch.load(weights, map_location=device)
-        model = FILANet(cfg["model"]["encoder"], False, cfg["model"]["fpn_channels"], 4).to(device)
+        model = build_model(cfg, device)
         model.load_state_dict(checkpoint["model"])
         model.eval()
-
         files = sorted({records[i]["file_name"] for i in np.where(folds == fold)[0]})
         written = 0
         for pos, file_name in enumerate(files, 1):
             out_path = cache_path(args.cache_dir, fold, file_name)
-            if not args.overwrite and available_prediction(out_path):
-                continue
+            if not args.overwrite and available_prediction(out_path): continue
             image = cv2.imread(str(image_dir / file_name), cv2.IMREAD_GRAYSCALE)
-            if image is None:
-                raise FileNotFoundError(image_dir / file_name)
+            if image is None: raise FileNotFoundError(image_dir / file_name)
             pred = predict_tiled(model, build_input_channels(image), device, inf["tile"], inf["overlap"], use_tta)
             save_prediction(out_path, pred)
             written += 1
-            if pos % 10 == 0 or pos == len(files):
-                print(f"fold={fold} cached={pos}/{len(files)}")
-
+            if pos % 10 == 0 or pos == len(files): print(f"fold={fold} cached={pos}/{len(files)}")
         manifest["folds"][str(fold)] = {
-            "weights": str(weights),
-            "weights_sha256": sha256_file(weights),
-            "validation_images": len(files),
-            "new_cache_files": written,
+            "weights": str(weights), "weights_sha256": sha256_file(weights),
+            "validation_images": len(files), "new_cache_files": written,
         }
         del model
-        if device == "cuda":
-            torch.cuda.empty_cache()
+        if device == "cuda": torch.cuda.empty_cache()
 
     manifest_path = Path(args.manifest)
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -103,5 +92,4 @@ def main():
     print(json.dumps(manifest, indent=2))
 
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()
