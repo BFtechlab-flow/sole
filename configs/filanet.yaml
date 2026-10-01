@@ -28,6 +28,8 @@ loss:
   center_dice: 0.15
   boundary_bce: 0.08
   distance: 0.12
+  topology: 0.05
+  orientation: 0.08
 inference:
   tile: 1024
   overlap: 256
@@ -38,5 +40,7 @@ inference:
   min_instance_area: 250
   bridge_max_distance: 28
   bridge_min_alignment: 0.80
+  bridge_min_region: 0.20
+  bridge_max_boundary: 0.75
 metric:
   iou_match_threshold: 0.50
