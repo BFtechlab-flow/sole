@@ -50,7 +50,8 @@ def main():
         pred = predict_tiled(model, build_input_channels(image), device, inf["tile"], inf["overlap"], inf["tta"])
         instances = reconstruct_instances(
             pred["region"], pred["centerline"], pred["boundary"], pred["distance"],
-            orientation=pred.get("orientation"), width=pred.get("width"), **inf,
+            orientation=pred.get("orientation"), width=pred.get("width"),
+            instance_embedding=pred.get("instance_embedding"), **inf,
         )
         for record in annotation_records:
             scores.append(pq_score(build_instances(record), instances, threshold=threshold, relation_threshold=relation_threshold))
