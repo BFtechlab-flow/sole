@@ -22,6 +22,8 @@ def test_advanced_model_heads_cpu():
         "endpoint_head": True,
         "junction_head": True,
         "uncertainty_head": True,
+        "instance_embedding_head": True,
+        "instance_embedding_dim": 4,
     }
     model = FILANet(
         encoder="convnext_tiny.fb_in1k",
@@ -37,6 +39,8 @@ def test_advanced_model_heads_cpu():
         assert key in out
         assert out[key].shape == (1, 1, 96, 96)
         assert torch.isfinite(out[key]).all()
+    assert out["instance_embedding"].shape == (1, 4, 96, 96)
+    assert torch.isfinite(out["instance_embedding"]).all()
 
 
 def test_endpoint_and_junction_targets():
