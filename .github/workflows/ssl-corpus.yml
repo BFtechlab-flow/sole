@@ -21,11 +21,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-      - name: Warm up encoder on diverse real NOAA/GONG frames
+      - name: Adapt ImageNet encoder on diverse real NOAA/GONG frames
         run: |
           python scripts/pretrain_gong_ssl.py \
-            --output artifacts/pretrain/gong_ssl_corpus.pt \
-            --manifest artifacts/pretrain/gong_ssl_corpus.json \
+            --imagenet-pretrained \
+            --output artifacts/pretrain/gong_ssl_imagenet.pt \
+            --manifest artifacts/pretrain/gong_ssl_imagenet.json \
             --max-images 6 \
             --min-images 4 \
             --epochs 2 \
@@ -38,16 +39,17 @@ jobs:
           import torch
           from src.model import FILANet
           from src.ssl_pretrain import load_ssl_encoder
-          ck = torch.load('artifacts/pretrain/gong_ssl_corpus.pt', map_location='cpu')
+          ck = torch.load('artifacts/pretrain/gong_ssl_imagenet.pt', map_location='cpu')
+          assert ck.get('initialization') == 'imagenet', ck.get('initialization')
           m = FILANet(ck['encoder_name'], False, 128, 4, advanced={'enabled': True})
           load_ssl_encoder(m, ck, strict=True)
-          print('strict SSL -> FILA-Net encoder transfer: OK')
+          print('ImageNet -> GONG SSL -> FILA-Net strict encoder transfer: OK')
           PY
       - name: Upload corpus checkpoint and manifest
         uses: actions/upload-artifact@v6
         with:
-          name: filanet-gong-ssl-corpus
+          name: filanet-gong-ssl-imagenet
           path: |
-            artifacts/pretrain/gong_ssl_corpus.pt
-            artifacts/pretrain/gong_ssl_corpus.json
+            artifacts/pretrain/gong_ssl_imagenet.pt
+            artifacts/pretrain/gong_ssl_imagenet.json
           if-no-files-found: error
