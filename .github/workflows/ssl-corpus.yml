@@ -1,0 +1,53 @@
+name: FILA-Net GONG SSL Corpus Warm-up
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  PYTHONPATH: .
+
+jobs:
+  ssl-corpus:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11.16"
+          cache: pip
+      - name: Install pinned dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Warm up encoder on diverse real NOAA/GONG frames
+        run: |
+          python scripts/pretrain_gong_ssl.py \
+            --output artifacts/pretrain/gong_ssl_corpus.pt \
+            --manifest artifacts/pretrain/gong_ssl_corpus.json \
+            --max-images 6 \
+            --min-images 4 \
+            --epochs 2 \
+            --steps-per-epoch 12 \
+            --image-size 224 \
+            --seed 2026
+      - name: Verify checkpoint can load into FILA-Net
+        run: |
+          python - <<'PY'
+          import torch
+          from src.model import FILANet
+          from src.ssl_pretrain import load_ssl_encoder
+          ck = torch.load('artifacts/pretrain/gong_ssl_corpus.pt', map_location='cpu')
+          m = FILANet(ck['encoder_name'], False, 128, 4, advanced={'enabled': True})
+          load_ssl_encoder(m, ck, strict=True)
+          print('strict SSL -> FILA-Net encoder transfer: OK')
+          PY
+      - name: Upload corpus checkpoint and manifest
+        uses: actions/upload-artifact@v6
+        with:
+          name: filanet-gong-ssl-corpus
+          path: |
+            artifacts/pretrain/gong_ssl_corpus.pt
+            artifacts/pretrain/gong_ssl_corpus.json
+          if-no-files-found: error

@@ -3,8 +3,9 @@ from __future__ import annotations
 import re
 import time
 import urllib.request
+from collections import defaultdict
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import numpy as np
 from astropy.io import fits
@@ -12,6 +13,7 @@ from astropy.io import fits
 
 H_ALPHA_INDEX = "https://services.swpc.noaa.gov/products/gong/haf/"
 _HREF_RE = re.compile(r'href=["\']([^"\']+\.fits\.fz)["\']', re.IGNORECASE)
+_FILE_RE = re.compile(r"(?P<stamp>\d{14})(?P<site>[A-Za-z])h\.fits\.fz$", re.IGNORECASE)
 
 
 def parse_halpha_index(html: str, index_url: str = H_ALPHA_INDEX, limit: int | None = None) -> list[str]:
@@ -22,13 +24,68 @@ def parse_halpha_index(html: str, index_url: str = H_ALPHA_INDEX, limit: int | N
     return urls
 
 
+def halpha_metadata(url: str) -> dict:
+    name = Path(urlparse(url).path).name
+    match = _FILE_RE.search(name)
+    return {
+        "url": url,
+        "name": name,
+        "timestamp": match.group("stamp") if match else None,
+        "site": match.group("site").upper() if match else None,
+    }
+
+
+def _evenly_spaced(items: list[str], count: int) -> list[str]:
+    if count <= 0 or not items:
+        return []
+    if count >= len(items):
+        return list(items)
+    indices = np.linspace(0, len(items) - 1, count).round().astype(int)
+    return [items[int(i)] for i in indices]
+
+
+def select_diverse_halpha_urls(urls: list[str], count: int) -> list[str]:
+    """Deterministically spread samples across observing sites and the index time span."""
+    urls = sorted(set(urls))
+    count = min(max(0, int(count)), len(urls))
+    if count == 0:
+        return []
+
+    by_site: dict[str, list[str]] = defaultdict(list)
+    unknown = []
+    for url in urls:
+        meta = halpha_metadata(url)
+        if meta["site"]:
+            by_site[meta["site"]].append(url)
+        else:
+            unknown.append(url)
+
+    if not by_site:
+        return _evenly_spaced(urls, count)
+
+    sites = sorted(by_site)
+    quota = {site: count // len(sites) for site in sites}
+    for site in sites[: count % len(sites)]:
+        quota[site] += 1
+
+    chosen = []
+    for site in sites:
+        chosen.extend(_evenly_spaced(by_site[site], min(quota[site], len(by_site[site]))))
+
+    chosen_set = set(chosen)
+    if len(chosen) < count:
+        remaining = [u for u in urls if u not in chosen_set]
+        chosen.extend(_evenly_spaced(remaining, count - len(chosen)))
+    return sorted(set(chosen))[:count]
+
+
 def _read_url(url: str, timeout: float = 20.0) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": "FILA-Net/2.0 solar research"})
+    req = urllib.request.Request(url, headers={"User-Agent": "FILA-Net/2.1 solar research"})
     with urllib.request.urlopen(req, timeout=timeout) as response:
         return response.read()
 
 
-def discover_halpha_urls(index_url: str = H_ALPHA_INDEX, limit: int = 1, retries: int = 3) -> list[str]:
+def discover_halpha_urls(index_url: str = H_ALPHA_INDEX, limit: int | None = 1, retries: int = 3) -> list[str]:
     last = None
     for attempt in range(retries):
         try:

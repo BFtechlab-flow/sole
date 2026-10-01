@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11.16"
           cache: pip
@@ -36,7 +36,7 @@ jobs:
             --max-images 1 \
             --image-size 192
       - name: Upload real-Sun proof + warm-up checkpoint
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: filanet-real-sun-smoke
           path: |

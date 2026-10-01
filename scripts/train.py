@@ -15,6 +15,7 @@ from src.losses import total_loss
 from src.model import FILANet
 from src.pq_official import aggregate_scores, pq_score
 from src.reconstruct import reconstruct_instances
+from src.ssl_pretrain import load_ssl_encoder
 from src.utils import load_yaml, resolve_path, seed_everything
 
 
@@ -138,11 +139,15 @@ def main():
 
     model = make_model(cfg, cfg["model"]["pretrained"]).to(device)
     if args.encoder_weights:
-        ssl = torch.load(args.encoder_weights, map_location="cpu")
-        if ssl.get("input_channels") != 4:
-            raise ValueError("SSL encoder checkpoint must have input_channels=4")
-        model.encoder.load_state_dict(ssl["encoder"], strict=True)
-        print(f"loaded SSL encoder from {args.encoder_weights}")
+        ssl = load_ssl_encoder(model, args.encoder_weights, strict=True)
+        if ssl.get("encoder_name") and ssl["encoder_name"] != cfg["model"]["encoder"]:
+            raise ValueError(
+                f"SSL encoder name {ssl['encoder_name']} does not match configured {cfg['model']['encoder']}"
+            )
+        print(
+            f"loaded SSL encoder from {args.encoder_weights}; "
+            f"images={ssl.get('images', 'unknown')} steps={ssl.get('completed_steps', 'unknown')}"
+        )
     opt = torch.optim.AdamW(
         model.parameters(), lr=cfg["train"]["lr"], weight_decay=cfg["train"]["weight_decay"]
     )
