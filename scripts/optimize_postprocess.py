@@ -70,7 +70,8 @@ def main():
             inf = dict(cfg["inference"]); inf.update(candidate)
             instances = reconstruct_instances(
                 pred["region"], pred["centerline"], pred["boundary"], pred["distance"],
-                orientation=pred.get("orientation"), width=pred.get("width"), **inf,
+                orientation=pred.get("orientation"), width=pred.get("width"),
+                instance_embedding=pred.get("instance_embedding"), **inf,
             )
             for gt in gt_sets: sums[ci, fold] += pq_score(gt, instances, threshold=threshold)["pq"]
         if item_no % 25 == 0 or item_no == len(by_fold_file):
