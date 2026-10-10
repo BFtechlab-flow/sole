@@ -1,0 +1,7 @@
+# Tiny search space for the CPU smoke test.
+mode: coordinate
+rounds: 1
+space:
+  region_threshold: [0.40, 0.50]
+  fill_holes: [false, true]
+  min_instance_score: [0.0, 0.5]

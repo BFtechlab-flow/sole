@@ -3,9 +3,15 @@ n_folds: 5
 fold: 0
 
 cv:
-  group_mode: observation
+  # day: every observation of the same UT day stays in one fold (GONG sites
+  # observe the same Sun minutes apart; filaments persist for days), so the
+  # OOF score is not inflated by near-duplicates. 'observation' only groups
+  # the annotators of one image; 'month' is a stricter stress test.
+  group_mode: day
 
 data:
+  # Searched automatically if missing (also /kaggle/input/competitions/...);
+  # $FILANET_DATA_ROOT overrides it.
   root: /kaggle/input/filament-segmentation-2026/MAGFiLO_1.0_Kaggle_2026
   train_json: train/MAGFiLO_1.0_Annotations_kaggle2026_train.json
   train_images: train/train_images
@@ -18,6 +24,8 @@ model:
   encoder: convnext_tiny.fb_in1k
   pretrained: true
   fpn_channels: 128
+  # Experimental full-resolution refiner (see src/model.py); ablation plus_fullres.
+  full_res_refine: false
   advanced:
     enabled: true
     limb_gate: true
@@ -42,8 +50,12 @@ train:
   weight_decay: 0.0001
   grad_clip_norm: 1.0
   amp: true
-  val_interval: 1
+  # Official micro-PQ validation of the held-out fold (selects fold{k}_best.pt).
+  val_interval: 2
+  val_max_images: null      # e.g. 60 for faster (noisier) validation
   validation_tta: false
+  warmup_epochs: 1
+  ema_decay: 0.0            # e.g. 0.999 to validate/save an EMA of the weights
 
 loss:
   region_bce: 0.25
@@ -74,6 +86,9 @@ inference:
   tile: 1024
   overlap: 256
   tta: true
+  # float16 autocast for the forward pass on CUDA (~2x faster on T4 tensor cores);
+  # the OOF cache and the test predictions must use the same setting.
+  amp: true
   region_threshold: 0.45
   center_threshold: 0.35
   min_region_area: 64
@@ -92,8 +107,14 @@ inference:
   bridge_max_geodesic_ratio: 1.8
   bridge_min_embedding_similarity: 0.15
   bridge_embedding_weight: 0.35
+  # V4 options (defaults reproduce V3; calibrated by scripts/optimize_postprocess.py)
+  seed_unmarked_components: false
+  fill_holes: false
+  instance_dilation: 0
+  min_instance_score: 0.0
 
 metric:
+  # Official: micro PQ over annotator entries, hit = IoU > 0.50 (src/pq_official.py)
   iou_match_threshold: 0.50
-  relation_iou_threshold: 0.10
-  bootstrap_iterations: 1000
+  relation_iou_threshold: 0.10   # extra diagnostic; the official plot uses IoU > 0
+  bootstrap_iterations: 2000

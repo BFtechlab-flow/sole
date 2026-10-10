@@ -1,0 +1,105 @@
+# CPU smoke-test configuration: runs the whole pipeline in minutes on the
+# SYNTHETIC dataset of tools/make_synthetic_dataset.py (not solar data).
+# It checks that the code runs; its numbers mean nothing.
+seed: 2026
+n_folds: 2
+fold: 0
+cv:
+  group_mode: observation
+data:
+  root: artifacts/synthetic_magfilo
+  train_json: train/MAGFiLO_1.0_Annotations_kaggle2026_train.json
+  train_images: train/train_images
+  test_images: test/test_images
+targets:
+  width_scale_px: 64.0
+model:
+  encoder: resnet18
+  pretrained: false
+  fpn_channels: 16
+  full_res_refine: false
+  advanced:
+    enabled: true
+    limb_gate: true
+    multiscale_context: true
+    frequency_branch: true
+    width_head: true
+    curvature_head: true
+    endpoint_head: true
+    junction_head: true
+    uncertainty_head: true
+    instance_embedding_head: true
+    instance_embedding_dim: 4
+train:
+  patch_size: 128
+  epochs: 1
+  batch_size: 2
+  val_batch_size: 2
+  workers: 0
+  lr: 0.0002
+  min_lr: 1.0e-06
+  weight_decay: 0.0001
+  grad_clip_norm: 1.0
+  amp: false
+  val_interval: 1
+  val_max_images: null
+  validation_tta: false
+  warmup_epochs: 0
+  ema_decay: 0.0
+loss:
+  region_bce: 0.25
+  region_dice: 0.3
+  center_bce: 0.1
+  center_dice: 0.15
+  boundary_bce: 0.08
+  distance: 0.12
+  topology: 0.05
+  orientation: 0.08
+  width: 0.05
+  curvature: 0.025
+  endpoint: 0.035
+  junction: 0.02
+  centerline_ce: 0.04
+  radius_balance: 0.04
+  uncertainty_region: 0.03
+  h0_persistence: 0.015
+  h0_max_size: 64
+  h0_max_features: 64
+  instance_embedding: 0.035
+  embedding_delta_var: 0.5
+  embedding_delta_dist: 1.5
+  embedding_max_pixels: 2048
+inference:
+  tile: 128
+  overlap: 32
+  tta: false
+  amp: false
+  region_threshold: 0.45
+  center_threshold: 0.35
+  min_region_area: 8
+  min_instance_area: 20
+  bridge_max_distance: 12
+  bridge_min_alignment: 0.8
+  bridge_min_region: 0.2
+  bridge_max_boundary: 0.75
+  bridge_max_width_ratio: 2.5
+  bridge_width_weight: 0.35
+  bridge_geodesic: true
+  bridge_geodesic_padding: 12
+  bridge_geodesic_region_weight: 2.0
+  bridge_geodesic_boundary_weight: 3.0
+  bridge_max_geodesic_ratio: 1.8
+  bridge_min_embedding_similarity: 0.15
+  bridge_embedding_weight: 0.35
+  seed_unmarked_components: false
+  fill_holes: false
+  instance_dilation: 0
+  min_instance_score: 0.0
+metric:
+  iou_match_threshold: 0.5
+  relation_iou_threshold: 0.1
+  bootstrap_iterations: 50
+submission:
+  expected_shape:
+  - 256
+  - 256

@@ -35,7 +35,14 @@ def _inverse_orientation(orientation, hflip=False, vflip=False):
 
 
 @torch.no_grad()
-def _predict_patch(model, tensor, tta=True):
+def _predict_patch(model, tensor, tta=True, amp=False):
+    """Predictions for one tile, averaged over the flip TTA views.
+
+    ``amp`` runs the network in float16 autocast on CUDA (about 2x faster on
+    T4/A100 tensor cores); outputs are cast back to float32 before averaging.
+    It has no effect on CPU.
+    """
+    use_amp = bool(amp) and tensor.device.type == "cuda"
     transforms = [(False, False)]
     if tta:
         transforms.extend([(True, False), (False, True), (True, True)])
@@ -48,7 +55,9 @@ def _predict_patch(model, tensor, tta=True):
 
     for hflip, vflip in transforms:
         aug = _inverse_flip(tensor, hflip=hflip, vflip=vflip)
-        raw = model(aug)
+        with torch.autocast(device_type=tensor.device.type, dtype=torch.float16, enabled=use_amp):
+            raw = model(aug)
+        raw = {k: v.float() for k, v in raw.items()}
 
         for k in SCALAR_KEYS:
             pred = torch.sigmoid(raw[k])
@@ -72,10 +81,12 @@ def _predict_patch(model, tensor, tta=True):
             ori = _inverse_orientation(ori, hflip=hflip, vflip=vflip)
             orientation_sum = ori if orientation_sum is None else orientation_sum + ori
 
-        if "instance_embedding" in raw:
-            emb = F.normalize(raw["instance_embedding"], dim=1, eps=1e-6)
-            emb = _inverse_flip(emb, hflip=hflip, vflip=vflip)
-            embedding_sum = emb if embedding_sum is None else embedding_sum + emb
+        if "instance_embedding" in raw and not (hflip or vflip):
+            # Identity view only. The discriminative loss fixes distances between
+            # instances, not absolute coordinates: the embedding of a flipped view
+            # may live in a differently arranged space, so averaging views could
+            # merge instances that each view separates.
+            embedding_sum = F.normalize(raw["instance_embedding"], dim=1, eps=1e-6)
 
     scale = 1.0 / len(transforms)
     out = {k: (v * scale)[0, 0].cpu().numpy() for k, v in summed.items()}
@@ -86,13 +97,13 @@ def _predict_patch(model, tensor, tta=True):
         ori = F.normalize(orientation_sum * scale, dim=1, eps=1e-6)
         out["orientation"] = ori[0].cpu().numpy()
     if embedding_sum is not None:
-        emb = F.normalize(embedding_sum * scale, dim=1, eps=1e-6)
-        out["instance_embedding"] = emb[0].cpu().numpy()
+        out["instance_embedding"] = embedding_sum[0].cpu().numpy()
     return out
 
 
 @torch.no_grad()
-def predict_tiled(model, x, device, tile=1024, overlap=256, tta=True):
+def predict_tiled(model, x, device, tile=1024, overlap=256, tta=True, amp=False):
+    """Full-image prediction from overlapping tiles blended with a Hann window."""
     _, h, w = x.shape
     acc = {k: np.zeros((h, w), np.float32) for k in SCALAR_KEYS}
     optional_acc = {}
@@ -106,7 +117,7 @@ def predict_tiled(model, x, device, tile=1024, overlap=256, tta=True):
         for z in positions(w, tile, overlap):
             p = x[:, y : y + tile, z : z + tile]
             tensor = torch.from_numpy(p[None]).float().to(device)
-            out = _predict_patch(model, tensor, tta=tta)
+            out = _predict_patch(model, tensor, tta=tta, amp=amp)
             hh, ww = p.shape[-2:]
             q = win[:hh, :ww]
 
@@ -141,4 +152,40 @@ def predict_tiled(model, x, device, tile=1024, overlap=256, tta=True):
         embedding = embedding_acc / np.maximum(weight[None], 1e-6)
         norm = np.linalg.norm(embedding, axis=0, keepdims=True)
         result["instance_embedding"] = embedding / np.maximum(norm, 1e-6)
+    return result
+
+
+def ensemble_predict(models, x, device, tile=1024, overlap=256, tta=True, amp=False):
+    """Fold ensemble: running mean of the tiled predictions of several models.
+
+    Probability maps are averaged and the axial orientation is averaged then
+    re-normalised. The instance embedding is taken from the FIRST model only:
+    each model learns its own arbitrary embedding coordinates, so embeddings
+    of different models cannot be averaged (only distances within one model
+    are meaningful). Optional heads are kept only if every model has them.
+    """
+    if not models:
+        raise ValueError("ensemble_predict needs at least one model")
+    out = predict_tiled(models[0], x, device, tile, overlap, tta, amp)
+    if len(models) == 1:
+        return out
+    embedding = out.pop("instance_embedding", None)
+    sums = {k: v.astype(np.float32, copy=True) for k, v in out.items()}
+    for model in models[1:]:
+        pred = predict_tiled(model, x, device, tile, overlap, tta, amp)
+        for key in list(sums):
+            if key in pred:
+                sums[key] += pred[key]
+            else:
+                del sums[key]
+        del pred
+    n = float(len(models))
+    result = {}
+    for key, total in sums.items():
+        mean = total / n
+        if key == "orientation":
+            mean = mean / np.maximum(np.linalg.norm(mean, axis=0, keepdims=True), 1e-6)
+        result[key] = mean.astype(np.float32)
+    if embedding is not None:
+        result["instance_embedding"] = embedding
     return result

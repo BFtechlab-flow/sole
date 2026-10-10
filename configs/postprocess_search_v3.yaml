@@ -1,8 +1,18 @@
-max_candidates: 96
+# Geodesic repair / embedding parameters of the V3 config, then the V4 options.
+mode: coordinate
+rounds: 2
+max_candidates: 48
 space:
   bridge_geodesic: [false, true]
   bridge_geodesic_region_weight: [1.0, 2.0, 3.0]
   bridge_geodesic_boundary_weight: [2.0, 3.0, 5.0]
   bridge_max_geodesic_ratio: [1.4, 1.8, 2.2]
-  bridge_min_embedding_similarity: [0.0, 0.15, 0.30]
+  bridge_min_embedding_similarity: [-1.0, 0.0, 0.15, 0.30]
   bridge_embedding_weight: [0.0, 0.35, 0.70]
+  region_threshold: [0.30, 0.38, 0.45, 0.52, 0.60]
+  center_threshold: [0.25, 0.35, 0.45]
+  min_instance_score: [0.0, 0.50, 0.55, 0.60, 0.65, 0.70]
+  min_instance_area: [100, 200, 300, 450, 650]
+  fill_holes: [false, true]
+  seed_unmarked_components: [false, true]
+  instance_dilation: [0, 1, 2, 3]

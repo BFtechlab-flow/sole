@@ -1,0 +1,18 @@
+FILA-Net - solar filament instance segmentation for the
+Solar Filament Segmentation Challenge 2026
+Copyright 2026 Giulio Barbieri (BF Tech Lab)
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party material used at run time, not redistributed here:
+
+* MAGFiLO competition data (images and annotations), CC BY-NC 4.0, provided
+  by the competition organizers. Only the annotations shipped with the
+  competition are used for training; the public MAGFiLO release is never
+  downloaded (it contains the test labels).
+* GONG H-alpha observations by the NSO Integrated Synoptic Program (NSO /
+  AURA / NSF, with contribution from NOAA), used unlabelled for optional
+  self-supervised pre-training.
+* ImageNet-pretrained ConvNeXt weights obtained through timm (Apache-2.0).
+* The organizers' Self_Evaluation_Notebook (Apache-2.0) is the reference for
+  the metric; it is not copied into this repository.

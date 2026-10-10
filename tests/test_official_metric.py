@@ -35,17 +35,30 @@ def test_empty_prediction_is_penalized_when_gt_exists():
     assert score["tp"] == 0 and score["fp"] == 0 and score["fn"] == 1
 
 
-def test_aggregate_reports_macro_and_micro():
+def test_aggregate_official_micro_and_macro_diagnostic():
     a = pq_score([mask([(1, 1)])], [mask([(1, 1)])])
     b = pq_score([mask([(2, 2)])], [])
     agg = aggregate_scores([a, b])
-    assert agg["macro_pq"] == pytest.approx(0.5)
     assert agg["tp"] == 1 and agg["fn"] == 1
-    assert agg["micro_pq"] == pytest.approx(1.0 / 1.5)
+    # official score = global sums (micro)
+    assert agg["pq"] == pytest.approx(1.0 / 1.5)
+    assert agg["micro_pq"] == agg["pq"]
+    # mean of per-entry PQ is only a diagnostic
+    assert agg["macro_pq_diagnostic"] == pytest.approx(0.5)
 
 
-def test_non_unique_panoptic_matches_raise():
+def test_overlapping_duplicates_are_counted_like_the_official_notebook():
+    # The organizers' code has no one-to-one assignment: both duplicates hit.
     gt = [mask([(1, 1), (1, 2), (1, 3)])]
     pred = [gt[0].copy(), gt[0].copy()]
-    with pytest.raises(ValueError):
-        pq_score(gt, pred)
+    score = pq_score(gt, pred)
+    assert (score["tp"], score["fp"], score["fn"]) == (2, 0, 0)
+
+
+def test_relations_use_any_overlap_like_the_official_plot():
+    gt = [mask([(1, 1), (1, 2), (1, 3), (1, 4)])]
+    pred = [mask([(1, 1), (1, 2)]), mask([(1, 3), (1, 4)])]  # split filament
+    score = pq_score(gt, pred)
+    assert score["gt_degree"] == [2]
+    assert score["one_to_many"] == 1
+    assert (score["tp"], score["fp"], score["fn"]) == (0, 2, 1)
