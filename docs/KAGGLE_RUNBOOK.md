@@ -47,6 +47,12 @@ automatically in the first session where every fold is finished **and** at
 least `POST_TRAINING_HOURS` remain; otherwise the notebook says so and the next
 session (with `RESUME_FROM`) does them without retraining.
 
+Kaggle's preinstalled packages (and its CUDA build of `torch`) are kept; only
+packages of `requirements.txt` that are missing are installed, and the versions
+actually used are saved in `artifacts/environment.txt`. The OOF maps (~5 GB)
+go to `/tmp` (`OOF_DIR`): they are rebuilt in the session that needs them and
+are not part of the saved output.
+
 The calibration searches on `POSTPROCESS_IMAGES_PER_FOLD = 60` images per fold
 by default (CPU-bound); the tuned setting is then evaluated on **all** OOF
 images (`artifacts/oof_metrics_tuned.json`). Set it to `None` in a session
