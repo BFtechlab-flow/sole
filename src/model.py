@@ -239,9 +239,19 @@ class FILANet(nn.Module):
             if bool(self.advanced.get("limb_gate", True)):
                 z = self.limb_gate(z, x)
 
-        z = F.interpolate(z, size=size, mode="bilinear", align_corners=False)
         if self.full_res is not None:
+            z = F.interpolate(z, size=size, mode="bilinear", align_corners=False)
             z = self.full_res(z, x)
+            return self._heads(z)
+        # The heads are 1x1 convolutions and bilinear upsampling is linear with
+        # weights summing to 1, so heads(upsample(z)) == upsample(heads(z)).
+        # Applying the heads at stride 4 and upsampling their few output
+        # channels gives the same result without materialising a full-resolution
+        # 128-channel tensor (1 GiB in float32 for a batch of two 1024^2 patches).
+        out = self._heads(z)
+        return {k: F.interpolate(v, size=size, mode="bilinear", align_corners=False) for k, v in out.items()}
+
+    def _heads(self, z):
         out = {k: h(z) for k, h in self.heads.items()}
         out["orientation"] = self.orientation_head(z)
         if self.advanced_enabled:
