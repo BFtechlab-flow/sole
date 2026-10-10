@@ -1,0 +1,199 @@
+% =============================================================================
+% FILA-Net — draft content for the organizers' Overleaf template
+% (https://www.overleaf.com/read/vjztpvrnbrdh, main.tex, ACM sigconf).
+%
+% How to use: copy each block below into the matching place of the
+% template's main.tex, replacing ONLY the gray \guide{...} text (the black
+% template text must stay unchanged). Add the entries of
+% report/references_extra.bib to the template's main.bib, upload
+% report/figures/pipeline.pdf and the figures written by the notebook
+% (artifacts/figures/*.png, artifacts/oof_export_tuned/oof_rubric_panels.png).
+%
+% Every \fillme{...} is a number that must come from a saved artifact of the
+% final run (file given in the placeholder). Do not submit with any \fillme
+% left: define it during writing as
+%   \newcommand{\fillme}[1]{\textcolor{red}{[#1]}}
+% and delete the definition at the end, so LaTeX fails if one is forgotten.
+% Sentences about components that the ablations reject must be removed.
+% =============================================================================
+
+% ------------------------------------------------------------------ title
+\title{FILA-Net: Topology-Aware Instance Reconstruction of Solar Filaments}
+
+% ------------------------------------------------------------------ abstract (after the black sentence)
+We predict, for every pixel of a $2048\times2048$ H-$\alpha$ image, a set of
+dense fields---filament region, centerline, boundary, normalized distance and
+axial orientation---with a ConvNeXt-T/FPN network, and reconstruct each
+filament as a separate instance with centerline seeds, an
+orientation-consistent endpoint graph repair and a marker-controlled
+watershed. All model and post-processing choices are made on out-of-fold
+predictions scored with the official Panoptic Quality (PQ), using folds that
+keep each observing day together and a nested calibration. Our final
+ensemble reaches an out-of-fold PQ of \fillme{oof\_metrics\_tuned.json: pq}
+(95\% CI \fillme{ci95}), compared with \fillme{data\_audit.json:
+inter\_annotator PQ} between human annotators.
+
+% ------------------------------------------------------------------ introduction (after the black text)
+The official score is the micro-averaged PQ over all annotator label sets,
+with a match at IoU $>0.5$; a predicted filament therefore counts as a false
+positive for every annotator who did not draw it. Our design follows from
+this: (i) predict instances that are complete and unfragmented, because a
+filament split in two pieces with IoU $\le0.5$ each yields two false positives
+and one false negative; (ii) report only instances whose expected
+contribution is positive. Section~\ref{sec:methodology} describes the
+pipeline (Fig.~\ref{fig:pipeline}) and Section~\ref{sec:evaluation} its
+out-of-fold evaluation. Code, notebook and weights:
+\url{https://github.com/BFtechlab-flow/sole}.
+
+% ------------------------------------------------------------------ methodology
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\textwidth]{pipeline.pdf}
+  \caption{FILA-Net pipeline. Top: inference on one image. Bottom: training,
+  validation and calibration, all scored with the official PQ.}
+  \label{fig:pipeline}
+\end{figure*}
+
+\paragraph{Data and splits.}
+The training set contains \fillme{data\_audit.json: unique\_observations}
+observations with \fillme{annotation\_records} annotator label sets and
+\fillme{filament\_instances} filaments. Every label set is a training sample
+(observations labeled by several annotators are seen once per annotator).
+We use 5 folds grouped by UT day: all observations of a day---the same Sun
+seen by several GONG sites minutes apart---and all their label sets belong to
+one fold, so the out-of-fold (OOF) score is not inflated by near-duplicates.
+Only the annotations provided by the competition are used.
+
+\paragraph{Inputs.}
+Each grayscale image is turned into four channels: intensity normalized
+between its 1st and 99th percentiles, CLAHE~\cite{zuiderveld1994clahe}, a
+ridge response (difference of Gaussians, $\sigma=1.2$ and $5$) that highlights
+thin dark threads, and the normalized radial position, which lets the network
+account for limb darkening.
+
+\paragraph{Network.}
+A ConvNeXt-T encoder~\cite{liu2022convnext} initialized on ImageNet (via
+timm~\cite{rw2019timm}) feeds a feature pyramid~\cite{lin2017fpn} fused at
+stride~4, refined by a multi-dilation context block, a high-frequency branch
+and a limb-aware gate (\fillme{kept/removed after ablation}), and upsampled to
+full resolution. $1\times1$ heads predict the region, centerline (dilated
+skeleton), boundary and per-filament normalized distance, the axial
+orientation $(\cos2\theta,\sin2\theta)$ of the skeleton, and auxiliary
+width, endpoint/junction and aleatoric-uncertainty maps
+\cite{kendall2017uncertainties}. All targets are derived from the
+segmentation polygons only.
+
+\paragraph{Training.}
+The loss combines BCE and Dice on region and centerline, BCE on the boundary,
+a smooth-$L_1$ distance term, clDice~\cite{shit2021cldice} for topological
+continuity, a cosine loss on the axial orientation and small weights on the
+auxiliary heads (\fillme{final weights: configs/filanet\_tuned.yaml}). We
+train on random $1024\times1024$ crops (70\% centered on a filament) with
+flips, AdamW (lr $2\cdot10^{-4}$, cosine schedule, warm-up), mixed precision
+and gradient clipping, for \fillme{epochs} epochs. Every two epochs the
+held-out fold is predicted in full and scored with the official PQ; the best
+epoch is kept.
+
+\paragraph{Inference.}
+Images are processed in $1024$-pixel tiles with $256$-pixel overlap blended
+by a Hann window, with flip test-time augmentation (the orientation field is
+transformed consistently) and averaging over the five fold models.
+
+\paragraph{Instance reconstruction.}
+The region probability is thresholded and small components are removed; the
+thresholded centerline is skeletonized to obtain seeds. Skeleton endpoints of
+different fragments are joined when the gap is short, aligned with the
+predicted orientation on both sides, supported by the region probability,
+free of boundary evidence and compatible in width (greedy acceptance in order
+of cost, without cycles). A marker-controlled watershed~\cite{beucher1993watershed}
+on the distance map (penalized at predicted boundaries) then assigns every
+foreground pixel to one filament, giving disjoint instances; holes are filled
+and instances optionally dilated. Finally each instance gets a confidence
+(its mean region probability): since adding an instance with match
+probability $p$ and expected IoU $u$ increases the micro PQ only if
+$p\,u > \mathrm{PQ}/2$, instances below a calibrated confidence are dropped.
+All reconstruction parameters are calibrated on OOF predictions
+(Section~\ref{sec:evaluation}). Masks are written as COCO RLE~\cite{lin2014coco}.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{test_predictions.png}
+  \caption{Predicted filaments (one color per instance) on test images.
+  \fillme{choose 2--3 representative OOF examples with ground truth instead,
+  including one failure case}.}
+  \label{fig:examples}
+\end{figure}
+
+% ------------------------------------------------------------------ evaluation
+\paragraph{Strategy.}
+Our evaluation code reproduces the organizers' notebook exactly (identical
+PQ on random multi-annotator scenes\fillme{ and on our OOF export: run
+tools/verify\_against\_official\_notebook.py on artifacts/oof\_export}). We report OOF
+scores: every training image is predicted by the model of the fold that did
+not see its day. Uncertainty comes from 2{,}000 bootstrap resamples of whole
+observations. Post-processing is calibrated by coordinate ascent with a
+nested scheme: for each fold, parameters are chosen on the other four and
+scored on it, which gives an unbiased estimate of the calibrated pipeline.
+
+\begin{table}[t]
+  \caption{Out-of-fold results (official micro PQ, 95\% bootstrap CI).}
+  \label{tab:main}
+  \small
+  \begin{tabular}{lcccc}
+    \toprule
+    & PQ & SQ & RQ & TP / FP / FN \\
+    \midrule
+    Human (annotator vs.\ annotator) & \fillme{} & \fillme{} & \fillme{} & \fillme{} \\
+    FILA-Net, default post-proc. & \fillme{} & \fillme{} & \fillme{} & \fillme{} \\
+    FILA-Net, nested calibration & \fillme{} & -- & -- & -- \\
+    FILA-Net, final (tuned) & \fillme{} & \fillme{} & \fillme{} & \fillme{} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[t]
+  \caption{Ablation (paired bootstrap of the OOF PQ difference with respect
+  to the previous row; \fillme{all folds / fold 0 screening}).}
+  \label{tab:ablation}
+  \small
+  \begin{tabular}{lcc}
+    \toprule
+    Variant & PQ & $\Delta$PQ [95\% CI] \\
+    \midrule
+    Baseline (BCE+Dice, no repair, no TTA) & \fillme{} & -- \\
+    + clDice topology loss & \fillme{} & \fillme{} \\
+    + orientation head & \fillme{} & \fillme{} \\
+    + endpoint graph repair & \fillme{} & \fillme{} \\
+    + flip TTA & \fillme{} & \fillme{} \\
+    + calibrated post-processing & \fillme{} & \fillme{} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{oof_rubric_panels.png}
+  \caption{OOF distributions of IoU and Dice over overlapping
+  ground-truth/prediction pairs, and one-to-many (fragmentation) /
+  many-to-one (merging) relations.}
+  \label{fig:rubric}
+\end{figure}
+
+\paragraph{Results.}
+Table~\ref{tab:main} summarizes the OOF scores and Table~\ref{tab:ablation}
+the contribution of each component. Fig.~\ref{fig:rubric} shows the
+rubric distributions: \fillme{fragmentation\_rate, merge\_rate, miss\_rate,
+spurious\_rate from oof\_metrics\_tuned.json}. The public leaderboard score
+is \fillme{score} (used only as a sanity check). Test inference with the
+5-model ensemble and TTA runs at \fillme{submission.verification.json:
+images\_per\_second} images/s on \fillme{GPU}.
+
+\paragraph{Strengths and weaknesses.}
+\fillme{Write from the measured numbers. Typical items to check:} the dense
+orientation and centerline fields make long curved filaments continuous;
+remaining errors are \fillme{misses of faint, small filaments / splits at
+gaps wider than the repair distance / merges of nearby filaments}, and part
+of the error is annotator disagreement (the human baseline above).
+Improvements: global (instead of greedy) endpoint matching, boundary
+refinement at full resolution, and self-supervised pre-training on unlabeled
+GONG frames.

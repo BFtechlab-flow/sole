@@ -1,12 +1,19 @@
-# OOF-only post-processing search. Keep candidate count bounded because each
-# candidate reconstructs all OOF images.
-max_candidates: 128
+# OOF-only post-processing calibration (scripts/optimize_postprocess.py).
+# coordinate mode: parameters are optimised one at a time, in this order,
+# for `rounds` passes; random mode samples `max_candidates` settings.
+mode: coordinate
+rounds: 2
+max_candidates: 48
 space:
-  region_threshold: [0.30, 0.38, 0.45, 0.52]
+  region_threshold: [0.30, 0.38, 0.45, 0.52, 0.60]
   center_threshold: [0.25, 0.35, 0.45]
+  min_instance_score: [0.0, 0.50, 0.55, 0.60, 0.65, 0.70]
+  min_instance_area: [100, 200, 300, 450, 650]
+  fill_holes: [false, true]
+  seed_unmarked_components: [false, true]
+  instance_dilation: [0, 1, 2, 3]
   min_region_area: [32, 64, 128]
-  min_instance_area: [100, 200, 300, 450]
-  bridge_max_distance: [0, 16, 28]
+  bridge_max_distance: [0, 16, 28, 40]
   bridge_min_alignment: [0.75, 0.82, 0.90]
   bridge_min_region: [0.15, 0.25]
   bridge_max_boundary: [0.65, 0.80]

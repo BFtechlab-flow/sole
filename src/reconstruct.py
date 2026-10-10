@@ -1,5 +1,6 @@
 import numpy as np
-from scipy.ndimage import convolve, distance_transform_edt
+from scipy.ndimage import binary_dilation, binary_fill_holes, convolve, distance_transform_edt, find_objects
+from scipy.ndimage import mean as ndi_mean
 from skimage.draw import line
 from skimage.graph import route_through_array
 from skimage.measure import label
@@ -29,11 +30,20 @@ def find_endpoints(skeleton):
     return sk & (neighbors == 1)
 
 
-def _local_tangent(component_mask, y, x, radius=5):
+def _local_tangent(component_mask, y, x, radius=5, label_value=None):
+    """PCA tangent of the skeleton around (y, x).
+
+    ``component_mask`` is either a boolean mask of one component or, when
+    ``label_value`` is given, a label image (only the local window is compared,
+    which avoids building a full-size mask per endpoint).
+    """
     h, w = component_mask.shape
     y0, y1 = max(0, y - radius), min(h, y + radius + 1)
     x0, x1 = max(0, x - radius), min(w, x + radius + 1)
-    yy, xx = np.nonzero(component_mask[y0:y1, x0:x1])
+    window = component_mask[y0:y1, x0:x1]
+    if label_value is not None:
+        window = window == label_value
+    yy, xx = np.nonzero(window)
     if len(xx) < 2:
         return None
     pts = np.column_stack((xx + x0, yy + y0)).astype(np.float32)
@@ -182,7 +192,7 @@ def bridge_skeleton_fragments(
     endpoint_info = []
     for idx, (y, x) in enumerate(endpoints):
         comp = int(components[y, x])
-        tangent = _local_tangent(components == comp, int(y), int(x))
+        tangent = _local_tangent(components, int(y), int(x), label_value=comp)
         local_width = _local_scalar(width, int(y), int(x))
         local_embedding = _local_embedding(instance_embedding, int(y), int(x))
         endpoint_info.append((idx, int(y), int(x), comp, tangent, local_width, local_embedding))
@@ -336,7 +346,89 @@ def bridge_skeleton_fragments(
     return sk | bridges, bridges, accepted
 
 
-def reconstruct_instances(
+DEFAULT_POSTPROCESS = {
+    # V3 parameters
+    "region_threshold": 0.45,
+    "center_threshold": 0.35,
+    "min_region_area": 64,
+    "min_instance_area": 250,
+    "bridge_max_distance": 28,
+    "bridge_min_alignment": 0.80,
+    "bridge_min_region": 0.20,
+    "bridge_max_boundary": 0.75,
+    "bridge_max_width_ratio": 2.5,
+    "bridge_width_weight": 0.35,
+    "bridge_geodesic": True,
+    "bridge_geodesic_padding": 12,
+    "bridge_geodesic_region_weight": 2.0,
+    "bridge_geodesic_boundary_weight": 3.0,
+    "bridge_max_geodesic_ratio": 1.8,
+    "bridge_min_embedding_similarity": 0.15,
+    "bridge_embedding_weight": 0.35,
+    # V4 additions (defaults reproduce V3 exactly; tune them on OOF only)
+    "seed_unmarked_components": False,
+    "fill_holes": False,
+    "instance_dilation": 0,
+    "min_instance_score": 0.0,
+}
+
+
+def _seed_unmarked(markers, fg):
+    """Give every foreground component that received no marker its own marker."""
+    comp, n = label(fg, connectivity=2, return_num=True)
+    if n == 0:
+        return markers
+    has_marker = np.zeros(n + 1, dtype=bool)
+    has_marker[np.unique(comp[markers > 0])] = True
+    has_marker[0] = True
+    missing = np.flatnonzero(~has_marker)
+    if missing.size == 0:
+        return markers
+    new_ids = np.zeros(n + 1, dtype=np.int64)
+    new_ids[missing] = np.arange(1, missing.size + 1) + int(markers.max())
+    sel = (new_ids[comp] > 0) & (markers == 0)
+    markers = markers.astype(np.int64, copy=True)
+    markers[sel] = new_ids[comp[sel]]
+    return markers
+
+
+def _fill_instance_holes(labels):
+    """Fill holes of every instance (GT filaments are single hole-free polygons).
+
+    Only unlabeled pixels are filled, so instances stay disjoint.
+    """
+    h, w = labels.shape
+    for i, sl in enumerate(find_objects(labels), start=1):
+        if sl is None:
+            continue
+        y0, y1 = max(0, sl[0].start - 1), min(h, sl[0].stop + 1)
+        x0, x1 = max(0, sl[1].start - 1), min(w, sl[1].stop + 1)
+        sub = labels[y0:y1, x0:x1]
+        filled = binary_fill_holes(sub == i)
+        sub[filled & (sub == 0)] = i
+    return labels
+
+
+def _dilate_instances(labels, radius, order):
+    """Grow instances by ``radius`` px into unlabeled pixels, best-scored first."""
+    if radius <= 0:
+        return labels
+    h, w = labels.shape
+    kernel = disk(int(radius)).astype(np.uint8)
+    slices = find_objects(labels)
+    for i in order:
+        sl = slices[i - 1] if i - 1 < len(slices) else None
+        if sl is None:
+            continue
+        y0, y1 = max(0, sl[0].start - radius), min(h, sl[0].stop + radius)
+        x0, x1 = max(0, sl[1].start - radius), min(w, sl[1].stop + radius)
+        sub = labels[y0:y1, x0:x1]
+        grown = binary_dilation(sub == i, structure=kernel)
+        sub[grown & (sub == 0)] = i
+    return labels
+
+
+def reconstruct_label_map(
     region,
     center,
     boundary,
@@ -361,8 +453,24 @@ def reconstruct_instances(
     bridge_max_geodesic_ratio=1.8,
     bridge_min_embedding_similarity=0.15,
     bridge_embedding_weight=0.35,
+    seed_unmarked_components=False,
+    fill_holes=False,
+    instance_dilation=0,
+    min_instance_score=0.0,
     **kwargs,
 ):
+    """Instance label map (0 = background, 1..N) and one confidence per instance.
+
+    Steps: threshold + small-component removal -> centerline seeds ->
+    endpoint graph repair -> marker-controlled watershed -> optional hole
+    filling / dilation -> area and confidence filters. The confidence of an
+    instance is its mean region probability: under micro PQ an instance with
+    probability ``p`` of being matched with IoU ``u`` raises the score only if
+    ``p * u > PQ / 2``, so low-confidence instances should be dropped
+    (``min_instance_score``, tuned on OOF).
+
+    Returns ``(labels, scores)`` with ``scores[k]`` the confidence of label k+1.
+    """
     fg = remove_small_components(region > region_threshold, min_region_area)
     seeds = skeletonize(closing((center > center_threshold) & fg, footprint=disk(1)))
 
@@ -396,14 +504,51 @@ def reconstruct_instances(
     if markers.max() == 0 and fg.any():
         d = distance_transform_edt(fg)
         markers = label(d > np.percentile(d[fg], 80), connectivity=2)
+    if seed_unmarked_components and fg.any():
+        markers = _seed_unmarked(markers, fg)
 
     inst = watershed(
         (-distance + 0.9 * boundary).astype(np.float32),
         markers=markers,
         mask=fg,
-    )
-    return [
-        (inst == i).astype(np.uint8)
-        for i in range(1, inst.max() + 1)
-        if (inst == i).sum() >= min_instance_area
-    ]
+    ).astype(np.int32)
+
+    if fill_holes and inst.max() > 0:
+        inst = _fill_instance_holes(inst)
+
+    n = int(inst.max())
+    if n == 0:
+        return np.zeros(inst.shape, np.int32), np.zeros(0, np.float32)
+
+    index = np.arange(1, n + 1)
+    region_f = np.asarray(region, dtype=np.float64)
+    if instance_dilation and int(instance_dilation) > 0:
+        pre_scores = np.nan_to_num(ndi_mean(region_f, labels=inst, index=index))
+        order = [int(i) for i in index[np.argsort(-pre_scores, kind="stable")]]
+        inst = _dilate_instances(inst, int(instance_dilation), order)
+
+    areas = np.bincount(inst.ravel(), minlength=n + 1)[1:]
+    scores = np.nan_to_num(ndi_mean(region_f, labels=inst, index=index)).astype(np.float32)
+    keep = (areas >= max(int(min_instance_area), 1)) & (scores >= float(min_instance_score))
+
+    remap = np.zeros(n + 1, dtype=np.int32)
+    remap[1:][keep] = np.arange(1, int(keep.sum()) + 1, dtype=np.int32)
+    return remap[inst], scores[keep]
+
+
+def label_map_to_masks(labels):
+    """List of full-size uint8 masks, one per label (in label order)."""
+    out = []
+    for i, sl in enumerate(find_objects(labels), start=1):
+        m = np.zeros(labels.shape, np.uint8)
+        if sl is not None:
+            m[sl] = labels[sl] == i
+        out.append(m)
+    return out
+
+
+def reconstruct_instances(region, center, boundary, distance, return_scores=False, **kwargs):
+    """V3 API: list of disjoint uint8 instance masks (optionally with scores)."""
+    labels, scores = reconstruct_label_map(region, center, boundary, distance, **kwargs)
+    masks = label_map_to_masks(labels)
+    return (masks, scores) if return_scores else masks

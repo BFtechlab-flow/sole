@@ -1,65 +1,54 @@
-# Final submission checklist
+# Final submission checklist (deadline: 15 November 2026)
 
-Competition final-material deadline announced by the organizers: **15 November 2026**.
+Final materials go through the organizers' Google form (Overview → *Final
+Submission*): the report PDF and the public repository link.
 
-## Reproducibility
+## Repository
 
-- [ ] Repository is publicly accessible.
-- [ ] `requirements.txt` contains exact versions.
-- [ ] `.python-version` is recorded.
-- [ ] `notebooks/filanet_end_to_end.ipynb` executes from the repository.
-- [ ] Data layout is documented.
-- [ ] Five final checkpoints are reproducible from the training command.
-- [ ] Final checkpoint SHA-256 values are retained.
-- [ ] Random seed and fold assignments are retained.
-- [ ] Hardware/runtime are documented.
+- [ ] Public, readable without any permission request; stays public at least
+      until the winners are announced (30 Nov 2026).
+- [ ] `requirements.txt` lists every package with its exact version.
+- [ ] `notebooks/filanet_end_to_end.ipynb` illustrates and runs the entire
+      pipeline (`tests/test_notebook_smoke.py` passes).
+- [ ] `weights/manifest.json` lists the five checkpoints of the submission
+      with SHA-256; the GitHub release with the files exists;
+      `python tools/weights.py fetch` works on a clean clone.
+- [ ] `configs/filanet_tuned.yaml` (the exact post-processing of the
+      submission) is committed.
+- [ ] `python -m pytest -q` passes.
 
-## Data integrity
+## Data and rules
 
-- [ ] `scripts/audit_data.py --strict --decode-all` passes.
-- [ ] 707 physical train observations are found.
-- [ ] 1,154 independent train annotation records are found.
-- [ ] 8,199 train filament instances are found.
-- [ ] All images are 2048×2048.
-- [ ] No physical observation crosses folds.
-- [ ] No test labels or test-overlapping external annotations were used.
+- [ ] `scripts/audit_data.py` matches the announced layout (707 observations,
+      1,154 records, 8,199 filaments, 2048 × 2048).
+- [ ] Only the competition annotations were used; the public MAGFiLO release
+      was never downloaded.
+- [ ] Inference uses only the test images (no other observation).
+- [ ] No hand labelling or manual correction of test predictions.
 
-## Evaluation
+## Numbers for the report (each from a saved artifact)
 
-- [ ] Local PQ semantics have been checked against the latest organizer notebook.
-- [ ] Strict `IoU > 0.50` edge case has a regression test.
-- [ ] OOF macro PQ is recorded.
-- [ ] OOF micro PQ is recorded.
-- [ ] Per-fold PQ is recorded.
-- [ ] Bootstrap interval is recorded.
-- [ ] Dice and IoU distributions are recorded.
-- [ ] One-to-many / many-to-one diagnostics are recorded.
-- [ ] Ablation results are recorded.
-- [ ] Post-processing nested-selection estimate is recorded.
+- [ ] Human baseline: `data_audit.json → inter_annotator_official_pq`.
+- [ ] OOF micro PQ + 95 % CI, SQ, RQ, TP/FP/FN, per-fold PQ: `oof_metrics.json`.
+- [ ] Nested calibration estimate and tuned OOF PQ: `postprocess_search.json`,
+      `oof_metrics_tuned.json`.
+- [ ] IoU/Dice distributions, 1:n / n:1 relations: `oof_export*/oof_rubric_panels.png`.
+- [ ] Ablation table with paired deltas and CIs: `ablations/compare_*.json`.
+- [ ] Runtime (images/s, GPU, ensemble size, TTA, AMP): `submission.verification.json`.
+- [ ] Public leaderboard score (only as a sanity check, never for tuning).
 
-## Submission artifact
+## Kaggle submission
 
-- [ ] Five-fold ensemble is generated from the frozen tuned config.
-- [ ] CSV contains exactly `filament_id,segmentation_rle`.
-- [ ] IDs are unique.
-- [ ] Every RLE decodes at the correct image size.
-- [ ] No instance is empty.
-- [ ] Predicted instances do not overlap.
 - [ ] `submission.verification.json` says `"ok": true`.
-- [ ] Submission SHA-256 is retained.
+- [ ] Up to two final submissions selected on Kaggle.
 
-## Four-page technical report
+## Report (organizers' Overleaf template)
 
-- [ ] Uses the organizer-provided report template.
-- [ ] Pipeline figure.
-- [ ] Preprocessing and supervision derivation.
-- [ ] Architecture and losses.
-- [ ] Instance reconstruction.
-- [ ] Leakage-safe validation protocol.
-- [ ] Main OOF result with uncertainty.
-- [ ] Ablation table.
-- [ ] IoU/Dice and fragmentation diagnostics.
-- [ ] Qualitative examples and failure cases.
-- [ ] Runtime/compute discussion.
-- [ ] Limitations and annotator disagreement.
-- [ ] Every numerical claim comes from a saved artifact.
+- [ ] Black template text unchanged; gray guide text replaced;
+      `\guideStylefalse` set; at most 4 pages excluding acknowledgment and
+      references.
+- [ ] Methodology: algorithm, end-to-end pipeline (pre/post-processing),
+      sampling and splits, pipeline figure, example segmentations.
+- [ ] Evaluation: strategy, tables/plots with uncertainty, strengths,
+      weaknesses and possible improvements.
+- [ ] Every number traceable to an artifact; no unmeasured claim.

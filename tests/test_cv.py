@@ -26,3 +26,17 @@ def test_month_grouping_is_supported():
     assert assert_group_isolation(records, folds, "month")
     for i in range(0, len(records), 2):
         assert folds[i] == folds[i + 1]
+
+
+def test_day_grouping_keeps_same_day_sites_together():
+    records = []
+    for day in range(1, 21):
+        # the same Sun observed by two GONG sites a few minutes apart, one with 2 annotators
+        records.append({"file_name": f"201503{day:02d}172714Mh.jpg"})
+        records.append({"file_name": f"201503{day:02d}172714Mh.jpg"})
+        records.append({"file_name": f"201503{day:02d}175020Bh.jpg"})
+    folds = fold_assignments(records, n_folds=5, group_mode="day")
+    assert assert_group_isolation(records, folds, "day")
+    for i in range(0, len(records), 3):
+        assert folds[i] == folds[i + 1] == folds[i + 2]
+    assert len(set(folds.tolist())) == 5

@@ -1,93 +1,219 @@
+"""Leakage-safe post-processing calibration on cached OOF predictions.
+
+Two search modes, both scored with the official micro PQ:
+
+* ``coordinate`` (default) - coordinate ascent over the parameters of
+  ``space`` (in the listed order, ``rounds`` passes), starting from the
+  current config. It is run once per outer fold on the OTHER folds (nested
+  estimate) and once on all folds (final setting). A memo table shares every
+  evaluated candidate between the searches, so the total cost is close to a
+  single search.
+* ``random`` - a seeded random sample of the grid plus the current setting,
+  evaluated once; the nested estimate selects per outer fold among them.
+
+The **nested estimate** (held-out folds scored with settings chosen without
+them) is the honest number to report; the final setting is written into
+``--write-config`` for test inference.
+"""
+
+import sys
+from pathlib import Path as _Path
+
+sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))  # repo root, so `src` imports work
+
 import argparse
 import copy
 import itertools
 import json
 import random
-from collections import defaultdict
+import time
 from pathlib import Path
 
 import numpy as np
 import yaml
 
-from src.cv import assert_group_isolation, fold_assignments
-from src.data import build_targets, load_coco_records
-from src.oof import cache_path, load_prediction
-from src.pq_official import pq_score
-from src.reconstruct import reconstruct_instances
-from src.search import nested_candidate_selection
-from src.utils import load_yaml, resolve_path
+from src.engine import load_records_and_folds, postprocess_params
+from src.oof_eval import build_jobs, counts_array, default_workers, run_jobs
+from src.utils import load_yaml
+
+
+def _pq(s):
+    den = s[..., 1] + 0.5 * s[..., 2] + 0.5 * s[..., 3]
+    return np.where(den > 0, s[..., 0] / np.maximum(den, 1e-12), 0.0)
+
+
+class Evaluator:
+    """Memoised evaluation of post-processing settings on all OOF entries."""
+
+    def __init__(self, records, folds, cache_dir, base, metric_cfg, workers, max_images_per_fold, seed):
+        self.base = dict(base)
+        self.jobs = build_jobs(records, folds, cache_dir, [self.base], metric_cfg,
+                               max_images_per_fold=max_images_per_fold, seed=seed)
+        self.workers = workers
+        self.memo = {}
+        self.entry_folds = None
+        self.passes = 0
+
+    @staticmethod
+    def token(params):
+        return json.dumps(params, sort_keys=True, default=str)
+
+    def evaluate(self, candidates):
+        todo, seen = [], set()
+        for c in candidates:
+            t = self.token(c)
+            if t not in self.memo and t not in seen:
+                todo.append(c)
+                seen.add(t)
+        if todo:
+            jobs = [j[:4] + (todo,) + j[5:] for j in self.jobs]
+            per_set = run_jobs(jobs, workers=self.workers)
+            self.passes += 1
+            for c, rows in zip(todo, per_set):
+                f, _, scored, counts = counts_array(rows)
+                if self.entry_folds is None:
+                    self.entry_folds = f[scored]
+                self.memo[self.token(c)] = counts[scored]
+            print(f"  evaluated {len(todo)} new candidate(s); memo size {len(self.memo)}", flush=True)
+        return [self.memo[self.token(c)] for c in candidates]
+
+    def fold_sums(self, counts, folds_sel):
+        mask = np.isin(self.entry_folds, list(folds_sel))
+        return counts[mask].sum(axis=0)
+
+
+def coordinate_search(ev, space, rounds, select_folds):
+    current = dict(ev.base)
+    cur_score = float(_pq(ev.fold_sums(ev.evaluate([current])[0], select_folds)))
+    path = [{"step": "start", "pq": cur_score}]
+    for r in range(int(rounds)):
+        changed = False
+        for key, values in space.items():
+            cands = [dict(current, **{key: v}) for v in values]
+            scores = [float(_pq(ev.fold_sums(c, select_folds))) for c in ev.evaluate(cands)]
+            best = int(np.argmax(scores))
+            if scores[best] > cur_score + 1e-9 and cands[best][key] != current.get(key):
+                current, cur_score, changed = cands[best], scores[best], True
+                path.append({"round": r, "key": key, "value": current[key], "pq": cur_score})
+        if not changed:
+            break
+    return current, cur_score, path
 
 
 def candidate_grid(search_space, max_candidates, seed, base):
     keys = list(search_space)
     values = [search_space[k] for k in keys]
-    combos = [dict(zip(keys, items)) for items in itertools.product(*values)]
-    if len(combos) > max_candidates:
-        rng = random.Random(seed); combos = rng.sample(combos, max_candidates)
-    canonical_base = {k: base.get(k) for k in keys}
-    if canonical_base not in combos: combos.insert(0, canonical_base)
-    unique = []; seen = set()
-    for item in combos:
-        token = tuple((k, item[k]) for k in keys)
-        if token not in seen:
-            seen.add(token); unique.append(item)
+    n_total = int(np.prod([len(v) for v in values])) if values else 1
+    rng = random.Random(seed)
+    if n_total <= 4 * max_candidates:
+        combos = [dict(zip(keys, items)) for items in itertools.product(*values)]
+        if len(combos) > max_candidates:
+            combos = rng.sample(combos, max_candidates)
+    else:  # sample without materialising a huge grid
+        combos, seen = [], set()
+        while len(combos) < max_candidates:
+            item = tuple(rng.randrange(len(v)) for v in values)
+            if item not in seen:
+                seen.add(item)
+                combos.append({k: v[i] for k, v, i in zip(keys, values, item)})
+    out = [{k: base.get(k) for k in keys}] + combos
+    unique, seen = [], set()
+    for item in out:
+        t = json.dumps(item, sort_keys=True, default=str)
+        if t not in seen:
+            seen.add(t)
+            unique.append(dict(base, **item))
     return unique
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", default="configs/filanet.yaml")
     ap.add_argument("--search-config", default="configs/postprocess_search.yaml")
     ap.add_argument("--cache-dir", default="artifacts/oof_cache")
     ap.add_argument("--output", default="artifacts/postprocess_search.json")
     ap.add_argument("--write-config", default="configs/filanet_tuned.yaml")
-    ap.add_argument("--max-candidates", type=int, default=None)
+    ap.add_argument("--mode", choices=["coordinate", "random"], default=None)
+    ap.add_argument("--max-candidates", type=int, default=None, help="random mode only")
+    ap.add_argument("--max-images-per-fold", type=int, default=None, help="quick screening on a subset")
+    ap.add_argument("--workers", type=int, default=default_workers())
     args = ap.parse_args()
 
-    cfg = load_yaml(args.config); search_cfg = load_yaml(args.search_config)
-    max_candidates = int(args.max_candidates if args.max_candidates is not None else search_cfg.get("max_candidates", 64))
-    candidates = candidate_grid(search_cfg["space"], max_candidates, cfg["seed"], cfg["inference"])
-    print(f"evaluating {len(candidates)} post-processing candidates")
-    root = Path(cfg["data"]["root"])
-    records = load_coco_records(resolve_path(root, cfg["data"]["train_json"]))
-    mode = cfg.get("cv", {}).get("group_mode", "observation")
-    folds = fold_assignments(records, cfg["n_folds"], mode); assert_group_isolation(records, folds, mode)
-    threshold = float(cfg["metric"].get("iou_match_threshold", 0.5))
-    by_fold_file = defaultdict(list)
-    for idx, (record, fold) in enumerate(zip(records, folds)):
-        by_fold_file[(int(fold), record["file_name"])].append(idx)
-    sums = np.zeros((len(candidates), cfg["n_folds"]), dtype=np.float64)
-    counts = np.zeros(cfg["n_folds"], dtype=np.int64)
-    width_scale = float(cfg.get("targets", {}).get("width_scale_px", 64.0))
+    cfg = load_yaml(args.config)
+    search_cfg = load_yaml(args.search_config)
+    mode = args.mode or search_cfg.get("mode", "coordinate")
+    space = search_cfg["space"]
+    base = postprocess_params(cfg)
+    records, folds, _, group_mode = load_records_and_folds(cfg)
+    n_folds = int(cfg["n_folds"])
+    t0 = time.time()
+    ev = Evaluator(records, folds, args.cache_dir, base, cfg.get("metric"), args.workers,
+                   args.max_images_per_fold, int(cfg["seed"]))
+    print(f"{mode} search over {len(space)} parameters on {len(ev.jobs)} OOF images", flush=True)
 
-    for item_no, ((fold, file_name), record_indices) in enumerate(by_fold_file.items(), 1):
-        path = cache_path(args.cache_dir, fold, file_name)
-        if not path.exists(): raise FileNotFoundError(f"missing OOF cache: {path}")
-        pred = load_prediction(path)
-        gt_sets = [build_targets(records[i], width_scale_px=width_scale)["instances"] for i in record_indices]
-        counts[fold] += len(record_indices)
-        for ci, candidate in enumerate(candidates):
-            inf = dict(cfg["inference"]); inf.update(candidate)
-            instances = reconstruct_instances(
-                pred["region"], pred["centerline"], pred["boundary"], pred["distance"],
-                orientation=pred.get("orientation"), width=pred.get("width"),
-                instance_embedding=pred.get("instance_embedding"), **inf,
-            )
-            for gt in gt_sets: sums[ci, fold] += pq_score(gt, instances, threshold=threshold)["pq"]
-        if item_no % 25 == 0 or item_no == len(by_fold_file):
-            print(f"processed {item_no}/{len(by_fold_file)} unique OOF images")
+    all_folds = list(range(n_folds))
+    heldout = np.zeros(4)
+    outer = []
+    if mode == "coordinate":
+        rounds = int(search_cfg.get("rounds", 2))
+        for f in all_folds:
+            sel = [g for g in all_folds if g != f]
+            params, sel_pq, _ = coordinate_search(ev, space, rounds, sel)
+            counts = ev.evaluate([params])[0]
+            hs = ev.fold_sums(counts, [f])
+            heldout += hs
+            outer.append({"heldout_fold": f, "selection_pq": sel_pq, "heldout_pq": float(_pq(hs)),
+                          "params": {k: params[k] for k in space}})
+            print(f"outer fold {f}: selection PQ {sel_pq:.4f} -> held-out PQ {float(_pq(hs)):.4f}", flush=True)
+        final, final_pq, path = coordinate_search(ev, space, rounds, all_folds)
+    else:
+        max_c = int(args.max_candidates or search_cfg.get("max_candidates", 48))
+        cands = candidate_grid(space, max_c, int(cfg["seed"]), base)
+        counts = ev.evaluate(cands)
+        fold_sums = np.stack([[ev.fold_sums(c, [f]) for f in all_folds] for c in counts])  # [C, F, 4]
+        for f in all_folds:
+            sel = [g for g in all_folds if g != f]
+            sel_pq = _pq(fold_sums[:, sel].sum(axis=1))
+            c = int(np.argmax(sel_pq))
+            heldout += fold_sums[c, f]
+            outer.append({"heldout_fold": f, "selection_pq": float(sel_pq[c]),
+                          "heldout_pq": float(_pq(fold_sums[c, f])), "params": {k: cands[c][k] for k in space}})
+        all_pq = _pq(fold_sums.sum(axis=1))
+        final, final_pq, path = cands[int(np.argmax(all_pq))], float(all_pq.max()), []
 
-    score_matrix = sums / np.maximum(counts[None, :], 1)
-    selection = nested_candidate_selection(score_matrix); final_idx = selection["final_candidate"]
-    ranking = np.argsort(-score_matrix.mean(axis=1)); trials = []
-    for idx in ranking[: min(25, len(ranking))]:
-        trials.append({"candidate": int(idx), "params": candidates[int(idx)], "mean_pq": float(score_matrix[idx].mean()), "fold_pq": [float(x) for x in score_matrix[idx]]})
-    payload = {"n_candidates": len(candidates), "group_mode": mode, "record_counts_by_fold": counts.tolist(), "nested_selection": selection, "final_params": candidates[final_idx], "top_trials": trials}
-    Path(args.output).parent.mkdir(parents=True, exist_ok=True); Path(args.output).write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    tuned = copy.deepcopy(cfg); tuned["inference"].update(candidates[final_idx]); tuned.setdefault("tuning", {})
-    tuned["tuning"].update({"source": args.output, "nested_macro_pq": selection["nested_macro_pq"], "selected_oof_macro_pq": selection["final_oof_score"]})
+    base_pq = float(_pq(ev.fold_sums(ev.evaluate([base])[0], all_folds)))
+    payload = {
+        "metric": "official micro PQ",
+        "mode": mode,
+        "group_mode": group_mode,
+        "images_evaluated": len(ev.jobs),
+        "subset_images_per_fold": args.max_images_per_fold,
+        "distinct_candidates_evaluated": len(ev.memo),
+        "seconds": round(time.time() - t0, 1),
+        "base_oof_micro_pq": base_pq,
+        "nested_micro_pq": float(_pq(heldout)),
+        "outer_selections": outer,
+        "final_oof_micro_pq": final_pq,
+        "final_params": {k: final[k] for k in space},
+        "final_search_path": path,
+    }
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+    Path(args.output).write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+
+    tuned = copy.deepcopy(cfg)
+    tuned["inference"].update({k: final[k] for k in space})
+    tuned.setdefault("tuning", {}).update({
+        "source": args.output,
+        "mode": mode,
+        "nested_micro_pq": payload["nested_micro_pq"],
+        "selected_oof_micro_pq": final_pq,
+        "base_oof_micro_pq": base_pq,
+        "subset_images_per_fold": args.max_images_per_fold,
+    })
     Path(args.write_config).write_text(yaml.safe_dump(tuned, sort_keys=False), encoding="utf-8")
-    print(json.dumps(payload, indent=2))
+    print(json.dumps({k: payload[k] for k in ("base_oof_micro_pq", "nested_micro_pq", "final_oof_micro_pq",
+                                              "final_params", "distinct_candidates_evaluated")}, indent=2, default=str))
 
 
-if __name__ == "__main__": main()
+if __name__ == "__main__":
+    main()

@@ -115,6 +115,34 @@ class AdaptiveFeatureMixer(nn.Module):
         return self.out(fused)
 
 
+class FullResolutionRefiner(nn.Module):
+    """Optional full-resolution path (``model.full_res_refine``).
+
+    The FPN decodes at stride 4 and is upsampled bilinearly, so boundaries of
+    thin filaments are only known to about +-2 px, which costs IoU. This cheap
+    branch (two 3x3 convs with 16 channels on the input channels) adds
+    pixel-level edge evidence to the upsampled features before the 1x1 heads.
+    Untested on MAGFiLO until the ``plus_fullres`` ablation has been run.
+    """
+
+    def __init__(self, in_chans, channels, mid=16):
+        super().__init__()
+        self.stem = nn.Sequential(
+            nn.Conv2d(in_chans, mid, 3, padding=1, bias=False),
+            nn.GroupNorm(4, mid),
+            nn.SiLU(),
+            nn.Conv2d(mid, mid, 3, padding=1, bias=False),
+            nn.GroupNorm(4, mid),
+            nn.SiLU(),
+        )
+        self.proj = nn.Conv2d(mid, channels, 1)
+        nn.init.zeros_(self.proj.weight)  # starts as identity: z_up is unchanged at init
+        nn.init.zeros_(self.proj.bias)
+
+    def forward(self, z_up, x):
+        return z_up + self.proj(self.stem(x))
+
+
 class FILANet(nn.Module):
     def __init__(
         self,
@@ -123,6 +151,7 @@ class FILANet(nn.Module):
         fpn_channels=128,
         in_chans=4,
         advanced=None,
+        full_res_refine=False,
     ):
         super().__init__()
         self.advanced = dict(advanced or {})
@@ -145,6 +174,8 @@ class FILANet(nn.Module):
             self.frequency = FrequencyResidualBranch(fpn_channels)
             self.mixer = AdaptiveFeatureMixer(fpn_channels)
             self.limb_gate = SolarLimbGate(fpn_channels)
+
+        self.full_res = FullResolutionRefiner(in_chans, fpn_channels) if full_res_refine else None
 
         self.heads = nn.ModuleDict(
             {
@@ -209,6 +240,8 @@ class FILANet(nn.Module):
                 z = self.limb_gate(z, x)
 
         z = F.interpolate(z, size=size, mode="bilinear", align_corners=False)
+        if self.full_res is not None:
+            z = self.full_res(z, x)
         out = {k: h(z) for k, h in self.heads.items()}
         out["orientation"] = self.orientation_head(z)
         if self.advanced_enabled:

@@ -1,70 +1,26 @@
-# Technical report working outline
+# Technical report
 
-Use the organizer's required Overleaf template for the final four-page PDF.
-This file is a content checklist, not a replacement template.
+The final report must be written in the organizers' Overleaf template
+(<https://www.overleaf.com/read/vjztpvrnbrdh>, ACM `sigconf`, 4 pages
+excluding acknowledgment and references; do not alter the black template
+text, replace the gray guide text, set `\guideStylefalse` at the end).
 
-## 1. Problem and contribution
+Material in this folder:
 
-- Solar filament instance segmentation in 2048×2048 GONG H-alpha imagery.
-- PQ-aware formulation.
-- Key idea: dense region + topology + orientation fields, followed by
-  conservative graph repair and instance watershed reconstruction.
-- State the exact final OOF PQ only after the five-fold run is complete.
+* `report_draft.tex` — the text for the title, abstract, introduction,
+  methodology and evaluation sections of the template, with `\fillme{...}`
+  placeholders that name the artifact each number comes from;
+* `references_extra.bib` — bibliography entries to append to the template's
+  `main.bib`;
+* `figures/pipeline.pdf` — the pipeline figure required by the template
+  (regenerate with `python tools/make_pipeline_figure.py`).
 
-## 2. Data and validation
+The other figures are written by the notebook in full mode
+(`artifacts/figures/`, `artifacts/oof_export_tuned/oof_rubric_panels.png`).
 
-- MAGFiLO competition split.
-- Multiple independent annotator records for some physical JPEGs.
-- Grouped split prevents same-observation leakage.
-- Explain macro record PQ and report micro PQ as secondary.
-- Describe nested post-processing calibration.
-
-## 3. Method
-
-- Four-channel input: robust-normalized intensity, CLAHE, ridge response, radial coordinate.
-- ConvNeXt Tiny feature pyramid.
-- Region / centerline / boundary / distance / axial orientation heads.
-- BCE + Dice + distance + clDice + orientation losses.
-- Native-resolution tiled inference and flip TTA.
-- Endpoint graph bridging.
-- Marker-controlled watershed.
-- COCO compressed RLE.
-
-## 4. Experiments
-
-Required table:
-
-| Variant | Macro OOF PQ | Δ | SQ | RQ | TP | FP | FN | Decision |
-|---|---:|---:|---:|---:|---:|---:|---:|---|
-| baseline | TBD | — | TBD | TBD | TBD | TBD | TBD | reference |
-| + topology | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-| + orientation | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-| + graph bridge | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-| + TTA | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
-
-Also include:
-- per-fold PQ variation;
-- nested calibration estimate;
-- matched IoU/Dice quantiles;
-- one-to-many / many-to-one counts;
-- runtime.
-
-## 5. Qualitative morphology
-
-Include representative:
-- long filament recovered correctly;
-- faint/small filament;
-- fragmentation corrected by graph bridge;
-- failure from false positive;
-- failure from over-merge;
-- annotator disagreement example.
-
-## 6. Reproducibility and limitations
-
-- exact environment;
-- seed and config;
-- checkpoint hashes;
-- full notebook;
-- dataset is not redistributed;
-- no test labels/external test-overlap annotations;
-- discuss multi-annotator ceiling and remaining recognition errors.
+Rules for the numbers: every value comes from a saved artifact of the final
+run (`data_audit.json`, `oof_metrics.json`, `oof_metrics_tuned.json`,
+`postprocess_search.json`, `ablations/compare_*.json`,
+`submission.verification.json`); the main score is the official micro PQ with
+its bootstrap interval; the nested calibration estimate is reported next to
+the tuned score; negative ablation results are reported too.
