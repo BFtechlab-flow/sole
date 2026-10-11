@@ -1,7 +1,11 @@
 """Official-metric validation of one fold checkpoint on its held-out observations."""
 
+import os
 import sys
 from pathlib import Path as _Path
+
+# less CUDA memory fragmentation (must be set before torch initialises CUDA)
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))  # repo root, so `src` imports work
 
