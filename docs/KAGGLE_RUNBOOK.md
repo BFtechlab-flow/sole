@@ -14,9 +14,13 @@ measured (no GPU and no competition data were available while writing this).
 After the first epoch, read `epoch_seconds` and `wall_seconds` in
 `checkpoints/fold0_log.jsonl` and plan with those numbers.
 
-Rough expectation on a Kaggle T4: 3–5 h per fold for 30 epochs including
-validation, i.e. 2–3 folds per session; OOF caching + calibration + test
-inference ≈ 4 h (`POST_TRAINING_HOURS`).
+Measured in the first full session (Kaggle, one Tesla T4, `configs/filanet.yaml`):
+a training epoch takes ~500 s and a validation pass (139 held-out
+observations, official PQ) ~480 s every second epoch, so one fold (30 epochs)
+takes ~6.2 h. With *GPU T4 × 2* the notebook trains two folds at once, one
+per GPU; how much faster that is depends on whether the 4 CPUs keep up with
+two data loaders (read `epoch_seconds` in the logs). OOF caching + calibration
++ test inference: budget `POST_TRAINING_HOURS = 4.5` h.
 
 ## One-time setup
 
@@ -25,7 +29,7 @@ inference ≈ 4 h (`POST_TRAINING_HOURS`).
    its GitHub URL). The notebook clones this repository into
    `/kaggle/working/sole` when it runs outside it.
 2. *Add Input → Competition*: **Solar Filament Segmentation Challenge 2026**.
-3. *Settings*: Accelerator **GPU T4** (or P100), **Internet on** (needed for
+3. *Settings*: Accelerator **GPU T4 × 2** (or one T4 / P100), **Internet on** (needed for
    `git clone`, `pip` and the ImageNet weights downloaded by `timm`).
 4. Run once with `MODE = "smoke"` (about 2 minutes) to check the environment.
 
@@ -37,15 +41,18 @@ output (checkpoints, logs, figures, metrics).
 
 | session | settings cell | produces |
 |---|---|---|
-| A | `MODE = "full"`, `FOLDS = [0, 1, 2]` | `fold0..2_best.pt`, `fold*_last.pt`, logs |
-| B | add **A's output** as input, `RESUME_FROM = "/kaggle/input/<A's output>/sole/checkpoints"` (check the exact path in the input panel), `FOLDS = [0, 1, 2, 3, 4]` | remaining folds (finished folds are skipped instantly) |
-| C (if needed) | same as B with B's output | the rest of the folds, then steps 5–10 |
+| A | `MODE = "full"` | as many epochs/folds as fit in `SESSION_HOURS`: `fold*_best.pt`, `fold*_last.pt`, `fold*_log.jsonl` |
+| B, C, … | nothing to change: *Add Input → Your Work → Notebooks* → the previous version of this notebook | the notebook finds the previous checkpoints in `/kaggle/input`, restores the most advanced copy of every fold, skips finished folds and resumes the others from `fold*_last.pt` |
+
+The first cell of section 4 prints the progress of every fold
+(`fold k: e/30 epochs`). `RESUME_FROM` is only needed to force a specific
+folder.
 
 Steps 5–10 (OOF predictions, official OOF evaluation, nested calibration,
 ablation plan, `submission.csv`, figures, weights manifest) start
 automatically in the first session where every fold is finished **and** at
 least `POST_TRAINING_HOURS` remain; otherwise the notebook says so and the next
-session (with `RESUME_FROM`) does them without retraining.
+session (with the previous output attached) does them without retraining.
 
 Kaggle's preinstalled packages (and its CUDA build of `torch`) are kept; only
 packages of `requirements.txt` that are missing are installed, and the versions

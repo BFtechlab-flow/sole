@@ -33,9 +33,13 @@ def main():
     ap.add_argument("--val-max-images", type=int, default=None, help="override train.val_max_images")
     ap.add_argument("--max-hours", type=float, default=None,
                     help="stop cleanly before this wall-clock budget (Kaggle: e.g. 11); rerun to resume")
+    ap.add_argument("--workers", type=int, default=None,
+                    help="override train.workers (data-loading processes; e.g. when two folds share the CPUs)")
     args = ap.parse_args()
 
     cfg = load_yaml(args.config)
+    if args.workers is not None:
+        cfg["train"]["workers"] = args.workers
     if args.val_max_images is not None:
         cfg["train"]["val_max_images"] = args.val_max_images
     result = train_fold(cfg, args.fold, args.output, epochs=args.epochs,
