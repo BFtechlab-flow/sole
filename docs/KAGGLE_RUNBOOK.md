@@ -18,8 +18,11 @@ Measured in the first full session (Kaggle, one Tesla T4, `configs/filanet.yaml`
 a training epoch takes ~500 s and a validation pass (139 held-out
 observations, official PQ) ~480 s every second epoch, so one fold (30 epochs)
 takes ~6.2 h. With *GPU T4 × 2* the notebook trains two folds at once, one
-per GPU; how much faster that is depends on whether the 4 CPUs keep up with
-two data loaders (read `epoch_seconds` in the logs). OOF caching + calibration
+per GPU. In the second session (two folds in parallel, 4 vCPUs) epochs took
+820–1080 s and validation passes ~760 s: the CPUs, not the GPUs, were the
+limit (only ~10 % more throughput than one GPU). Building a training sample
+was then made 1.8× faster with bit-identical results (channels computed on
+the patch, per-worker caches; `tests/test_channels_window.py`). OOF caching + calibration
 + test inference: budget `POST_TRAINING_HOURS = 4.5` h.
 
 ## One-time setup
