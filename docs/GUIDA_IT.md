@@ -280,7 +280,8 @@ Attenzione: la loss di ricostruzione del pre-addestramento che scende
 ## 7. Piano operativo
 
 1. **Kaggle**: segui `docs/KAGGLE_RUNBOOK.md` (notebook in modalità `full`,
-   2–3 fold per sessione, ripresa con `RESUME_FROM`).
+   ~6 h per fold su una T4, due fold in parallelo con *GPU T4 × 2*; ogni
+   sessione successiva riparte da sola se le alleghi l'output della precedente).
 2. **Dopo i 5 fold**: il notebook fa da solo OOF, valutazione, calibrazione,
    `submission.csv` e figure.
 3. **Invio su Kaggle** di `submission.csv` (max 5 al giorno; sceglierne fino
