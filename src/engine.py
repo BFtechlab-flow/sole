@@ -175,7 +175,7 @@ def train_fold(cfg, fold, output, epochs=None, encoder_weights=None, resume="aut
     train_dl = DataLoader(train_ds, batch_size=tcfg["batch_size"], shuffle=True, num_workers=workers,
                           pin_memory=device == "cuda", persistent_workers=workers > 0, drop_last=True)
     val_dl = DataLoader(val_ds, batch_size=tcfg.get("val_batch_size", tcfg["batch_size"]), shuffle=False,
-                        num_workers=workers, pin_memory=device == "cuda")
+                        num_workers=workers, pin_memory=device == "cuda", persistent_workers=workers > 0)
 
     model = make_model(cfg, bool(cfg["model"].get("pretrained", True))).to(device)
     if encoder_weights:

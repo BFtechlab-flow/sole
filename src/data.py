@@ -37,23 +37,79 @@ def robust_normalize(img):
     return np.clip((x - lo) / (hi - lo + 1e-8), 0, 1)
 
 
-def build_input_channels(gray):
-    raw = robust_normalize(gray)
-    u8 = (raw * 255).astype(np.uint8)
-    clahe = cv2.createCLAHE(2.0, (8, 8)).apply(u8).astype(np.float32) / 255
+_RADIAL_CACHE: dict = {}
+
+#: Margin (pixels) of the Gaussian blurs when channels are built for a window
+#: only: OpenCV's float32 kernels have radius 20 for sigma 5, so 32 px gives
+#: values identical to whole-image blurring (tests/test_channels_window.py).
+BLUR_PAD = 32
+
+
+def radial_channel(h, w):
+    """Normalised distance to the image centre (cached per image size)."""
+    key = (int(h), int(w))
+    if key not in _RADIAL_CACHE:
+        yy, xx = np.mgrid[:h, :w]
+        cx, cy = (w - 1) / 2, (h - 1) / 2
+        radial = np.clip(
+            np.sqrt(((xx - cx) / (cx + 1e-8)) ** 2 + ((yy - cy) / (cy + 1e-8)) ** 2),
+            0,
+            1,
+        )
+        _RADIAL_CACHE[key] = radial.astype(np.float32)
+    return _RADIAL_CACHE[key]
+
+
+def _ridge(raw):
     b1 = cv2.GaussianBlur(raw, (0, 0), 1.2)
     b2 = cv2.GaussianBlur(raw, (0, 0), 5.0)
-    ridge = b2 - b1
-    ridge = (ridge - ridge.min()) / (np.ptp(ridge) + 1e-8)
-    h, w = raw.shape
-    yy, xx = np.mgrid[:h, :w]
-    cx, cy = (w - 1) / 2, (h - 1) / 2
-    radial = np.clip(
-        np.sqrt(((xx - cx) / (cx + 1e-8)) ** 2 + ((yy - cy) / (cy + 1e-8)) ** 2),
-        0,
-        1,
-    )
-    return np.stack([raw, clahe, ridge, radial], 0).astype(np.float32)
+    return b2 - b1
+
+
+def input_channel_stats(gray):
+    """Image-wide constants of ``build_input_channels`` (intensity percentiles, ridge range)."""
+    lo, hi = np.percentile(gray.astype(np.float32), [1, 99])
+    raw = np.clip((gray.astype(np.float32) - lo) / (hi - lo + 1e-8), 0, 1)
+    ridge = _ridge(raw)
+    return {"lo": lo, "hi": hi, "ridge_min": ridge.min(), "ridge_ptp": np.ptp(ridge)}
+
+
+def build_input_channels(gray, window=None, stats=None):
+    """Four input channels: robust intensity, CLAHE, ridge (DoG) and radial position.
+
+    ``window = (y0, x0, height, width)`` returns only that crop, computed
+    without blurring the whole image; ``stats`` (from ``input_channel_stats``)
+    supplies the image-wide constants. The values are identical to cropping
+    the whole-image result.
+    """
+    x = gray.astype(np.float32)
+    h, w = x.shape
+    if stats is None:
+        if window is not None:
+            stats = input_channel_stats(gray)
+        else:
+            lo, hi = np.percentile(x, [1, 99])
+    if stats is not None:
+        lo, hi = stats["lo"], stats["hi"]
+    raw = np.clip((x - lo) / (hi - lo + 1e-8), 0, 1)
+    u8 = (raw * 255).astype(np.uint8)
+    clahe = cv2.createCLAHE(2.0, (8, 8)).apply(u8).astype(np.float32) / 255
+    if window is None:
+        y0, x0, wh, ww = 0, 0, h, w
+        ridge = _ridge(raw)
+    else:
+        y0, x0, wh, ww = (int(v) for v in window)
+        by0, by1 = max(0, y0 - BLUR_PAD), min(h, y0 + wh + BLUR_PAD)
+        bx0, bx1 = max(0, x0 - BLUR_PAD), min(w, x0 + ww + BLUR_PAD)
+        ridge = _ridge(np.ascontiguousarray(raw[by0:by1, bx0:bx1]))
+        ridge = ridge[y0 - by0 : y0 - by0 + wh, x0 - bx0 : x0 - bx0 + ww]
+    if stats is None:
+        rmin, rptp = ridge.min(), np.ptp(ridge)
+    else:
+        rmin, rptp = stats["ridge_min"], stats["ridge_ptp"]
+    ridge = (ridge - rmin) / (rptp + 1e-8)
+    sl = (slice(y0, y0 + wh), slice(x0, x0 + ww))
+    return np.stack([raw[sl], clahe[sl], ridge, radial_channel(h, w)[sl]], 0).astype(np.float32)
 
 
 def segmentation_to_mask(seg, h, w):
@@ -339,6 +395,26 @@ class FilamentDataset(Dataset):
         self.patch_size = patch_size
         self.train = train
         self.width_scale_px = float(width_scale_px)
+        # Per-process caches (each DataLoader worker has its own; persistent
+        # workers keep them across epochs). They only avoid recomputation:
+        # the samples are identical to computing everything from scratch.
+        self._stats_cache = {}
+        self._region_cache = {}
+
+    def _channel_stats(self, file_name, img):
+        if file_name not in self._stats_cache:
+            self._stats_cache[file_name] = input_channel_stats(img)
+        return self._stats_cache[file_name]
+
+    def _region_pixels(self, idx, masks, h, w):
+        """Row-major coordinates of the annotated pixels (as ``np.where(region > 0)``)."""
+        if idx not in self._region_cache:
+            region = np.zeros((h, w), np.uint8)
+            for m in masks:
+                np.maximum(region, m, out=region)
+            ys, xs = np.where(region > 0)
+            self._region_cache[idx] = (ys.astype(np.int16), xs.astype(np.int16))
+        return self._region_cache[idx]
 
     def __len__(self):
         return len(self.records)
@@ -349,18 +425,14 @@ class FilamentDataset(Dataset):
         if img is None:
             raise FileNotFoundError(self.image_dir / r["file_name"])
 
-        x = build_input_channels(img)
         masks = annotation_masks(r)
         h, w = int(r["height"]), int(r["width"])
         s = min(self.patch_size, h, w)
 
         # Same random draws, in the same order, as the V3 implementation.
         if self.train:
-            region = np.zeros((h, w), np.uint8)
-            for m in masks:
-                np.maximum(region, m, out=region)
-            if region.any() and random.random() < 0.7:
-                ys, xs = np.where(region > 0)
+            ys, xs = self._region_pixels(idx, masks, h, w)
+            if len(xs) and random.random() < 0.7:
                 j = random.randrange(len(xs))
                 cy, cx = ys[j], xs[j]
                 y = max(0, min(h - s, int(cy) - s // 2))
@@ -372,7 +444,7 @@ class FilamentDataset(Dataset):
             y = max((h - s) // 2, 0)
             z = max((w - s) // 2, 0)
 
-        x = x[:, y : y + s, z : z + s]
+        x = build_input_channels(img, window=(y, z, s, s), stats=self._channel_stats(r["file_name"], img))
         cropped = build_targets(r, width_scale_px=self.width_scale_px, window=(y, z, s, s), masks=masks)
         cropped = {k: cropped[k] for k in TARGET_KEYS}
 
