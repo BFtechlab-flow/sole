@@ -7,10 +7,15 @@
   per GPU (``CUDA_VISIBLE_DEVICES``), each GPU taking the next fold when it
   is free. Each process is an ordinary ``scripts/train.py`` run, so the
   method and the results do not depend on how many GPUs were used; only the
-  wall-clock time does.
+  wall-clock time does. The same scheduler runs the GPU steps after training
+  (OOF cache, test maps).
+* ``restore_post_training_artifacts`` brings back the OOF cache, the cached
+  test maps and the calibration memo of a previous session, but only when
+  they were produced by exactly the current fold checkpoints (SHA-256).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import subprocess
@@ -109,7 +114,8 @@ def run_fold_jobs(folds, make_args, gpus, env, cwd, hours_left, min_hours: float
                     return
                 remaining = hours_left()
                 if remaining < min_hours:
-                    print(f"{prefix}session budget used: rerun the notebook to continue with fold {queue[0]}", flush=True)
+                    print(f"{prefix}session budget used: rerun the notebook to continue ({queue[0]} not started)",
+                          flush=True)
                     return
                 fold = queue.pop(0)
             args = [str(a) for a in make_args(fold, remaining, n_parallel)]
@@ -129,3 +135,99 @@ def run_fold_jobs(folds, make_args, gpus, env, cwd, hours_left, min_hours: float
     for t in threads:
         t.join()
     return failures
+
+
+def sha256_file(path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _copy_missing(src: Path, dst: Path) -> int:
+    n = 0
+    for f in src.rglob("*"):
+        if f.is_file():
+            target = dst / f.relative_to(src)
+            if not target.exists():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(f, target)
+                n += 1
+    return n
+
+
+def _oof_weights(cache_dir: Path) -> dict:
+    """fold -> SHA-256 of the checkpoint that produced the cached maps (from the cache manifests)."""
+    out = {}
+    for m in sorted(cache_dir.glob("manifest*.json")):
+        try:
+            for fold, info in json.loads(m.read_text()).get("folds", {}).items():
+                if info.get("weights_sha256"):
+                    out[str(fold)] = info["weights_sha256"]
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+def _memo_size(path: Path) -> int:
+    import numpy as np
+
+    try:
+        with np.load(path, allow_pickle=False) as data:
+            return int(len(data["tokens"]))
+    except Exception:  # noqa: BLE001 - unreadable memo: ignored
+        return -1
+
+
+def restore_post_training_artifacts(previous_artifacts, art, fold_weights, log=print) -> dict:
+    """Restore ``oof_cache/``, ``test_maps/`` and ``postprocess_memo.npz`` from previous sessions.
+
+    Only data produced by the current checkpoints are restored: OOF folds whose
+    manifest SHA-256 matches ``fold_weights[k]``, test maps whose manifest lists
+    exactly the current fold checkpoints. The calibration memo carries its own
+    signature (checked when it is loaded); the largest one is restored.
+    """
+    art = Path(art)
+    current = [sha256_file(w) for w in fold_weights]
+    summary = {"oof_folds": {}, "test_maps": 0, "memo": None}
+    best_memo, best_size = None, _memo_size(art / "postprocess_memo.npz") if (art / "postprocess_memo.npz").exists() else -1
+    for prev in map(Path, previous_artifacts):
+        if not prev.is_dir() or prev.resolve() == art.resolve():
+            continue
+        oof = prev / "oof_cache"
+        if oof.is_dir():
+            shas = _oof_weights(oof)
+            good = {f: sha for f, sha in shas.items() if int(f) < len(current) and sha == current[int(f)]}
+            for f in sorted(good):
+                if (oof / f"fold{f}").is_dir():
+                    n = _copy_missing(oof / f"fold{f}", art / "oof_cache" / f"fold{f}")
+                    summary["oof_folds"][f] = summary["oof_folds"].get(f, 0) + n
+            if good:
+                (art / "oof_cache").mkdir(parents=True, exist_ok=True)
+                manifest = {"restored_from": str(oof), "folds": {f: {"weights_sha256": good[f]} for f in good}}
+                k = len(list((art / "oof_cache").glob("manifest_restored*.json")))
+                (art / "oof_cache" / f"manifest_restored{k}.json").write_text(json.dumps(manifest, indent=2))
+        maps = prev / "test_maps"
+        if (maps / "manifest.json").is_file():
+            try:
+                info = json.loads((maps / "manifest.json").read_text())
+            except ValueError:
+                info = {}
+            if info.get("weights_sha256") == current:
+                summary["test_maps"] += _copy_missing(maps, art / "test_maps")
+        memo = prev / "postprocess_memo.npz"
+        if memo.is_file():
+            size = _memo_size(memo)
+            if size > best_size:
+                best_memo, best_size = memo, size
+    if best_memo is not None:
+        shutil.copy2(best_memo, art / "postprocess_memo.npz")
+        summary["memo"] = {"from": str(best_memo), "candidates": best_size}
+    for f, n in sorted(summary["oof_folds"].items()):
+        log(f"restored {n} OOF map(s) of fold {f}")
+    if summary["test_maps"]:
+        log(f"restored {summary['test_maps']} cached test file(s)")
+    if summary["memo"]:
+        log(f"restored the calibration memo ({best_size} evaluated candidates) from {best_memo}")
+    return summary

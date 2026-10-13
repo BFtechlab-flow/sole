@@ -73,13 +73,48 @@ def test_full_pipeline_on_synthetic_data(tmp_path):
     assert {"nested_micro_pq", "final_params", "base_oof_micro_pq"} <= set(search)
     assert yaml.safe_load(tuned.read_text())["tuning"]["mode"] == "coordinate"
 
+    # resumable calibration: a memo replays evaluated candidates; partial memos resume to the same result
+    import numpy as np
+
+    memo = art / "memo.npz"
+    search_args = ["scripts/optimize_postprocess.py", "--config", str(cfg_path), "--search-config",
+                   "configs/postprocess_search_smoke.yaml", "--cache-dir", str(art / "oof"), "--write-config",
+                   str(tmp_path / "tuned_memo.yaml"), "--workers", "2", "--memo", str(memo)]
+    run(search_args + ["--output", str(art / "s0.json"), "--max-hours", "0.000001"], env)
+    assert json.loads((art / "s0.json").read_text())["complete"] is False
+    run(search_args + ["--output", str(art / "s1.json")], env)
+    s1 = json.loads((art / "s1.json").read_text())
+    keys = ("nested_micro_pq", "final_params", "base_oof_micro_pq", "final_oof_micro_pq", "outer_selections")
+    assert s1["complete"] and all(s1[k] == search[k] for k in keys)
+    with np.load(memo) as d:  # keep only half of the evaluated candidates, as after an interrupted session
+        half = len(d["tokens"]) // 2
+        np.savez_compressed(memo, signature=d["signature"], tokens=d["tokens"][:half], counts=d["counts"][:half],
+                            entry_folds=d["entry_folds"])
+    out = run(search_args + ["--output", str(art / "s2.json")], env)
+    s2 = json.loads((art / "s2.json").read_text())
+    assert f"restored {half} evaluated candidate(s)" in out
+    assert s2["complete"] and all(s2[k] == search[k] for k in keys)
+    out = run(search_args + ["--output", str(art / "s3.json"), "--max-hours", "0.000001"], env)  # pure replay
+    s3 = json.loads((art / "s3.json").read_text())
+    assert s3["complete"] and all(s3[k] == search[k] for k in keys) and "new candidate(s)" not in out
+
     sub = tmp_path / "submission.csv"
-    run(["scripts/infer.py", "--config", str(tuned), "--weights", str(ck / "fold0_best.pt"), str(ck / "fold1_best.pt"),
-         "--output", str(sub)], env)
+    weights = [str(ck / "fold0_best.pt"), str(ck / "fold1_best.pt")]
+    run(["scripts/infer.py", "--config", str(tuned), "--weights", *weights, "--output", str(sub),
+         "--maps-dir", str(art / "test_maps")], env)
     report = json.loads(sub.with_suffix(".verification.json").read_text())
     assert report["ok"] and report["runtime"]["images"] == 3
+    assert report["runtime"]["images_predicted_by_the_networks"] == 3
     text = sub.read_text()
     assert text.startswith("filament_id,segmentation_rle\n") and '"' not in text
+    # the same submission from the cached maps alone (no network), and from a fresh prediction
+    sub_maps, sub_fresh = tmp_path / "submission_maps.csv", tmp_path / "submission_fresh.csv"
+    run(["scripts/infer.py", "--config", str(tuned), "--maps-dir", str(art / "test_maps"), "--output",
+         str(sub_maps)], env)
+    run(["scripts/infer.py", "--config", str(tuned), "--weights", *weights, "--output", str(sub_fresh)], env)
+    assert sub_maps.read_text() == text == sub_fresh.read_text()
+    assert json.loads(sub_maps.with_suffix(".verification.json").read_text())["runtime"][
+        "images_post_processed_from_cached_maps"] == 3
 
     out = run(["scripts/run_ablation.py", "--config", str(cfg_path), "--output-dir", str(art / "abl"),
                "--folds", "0", "--epochs", "1"], env)

@@ -282,8 +282,12 @@ Attenzione: la loss di ricostruzione del pre-addestramento che scende
 1. **Kaggle**: segui `docs/KAGGLE_RUNBOOK.md` (notebook in modalità `full`,
    ~6 h per fold su una T4, due fold in parallelo con *GPU T4 × 2*; ogni
    sessione successiva riparte da sola se le alleghi l'output della precedente).
-2. **Dopo i 5 fold**: il notebook fa da solo OOF, valutazione, calibrazione,
-   `submission.csv` e figure.
+2. **Dopo i 5 fold**: una sessione **GPU T4 × 2** calcola la cache OOF e le
+   mappe del test (due GPU in parallelo), scrive `submission_default.csv` e
+   la valutazione OOF ufficiale; poi una o due sessioni **senza GPU**
+   (*Accelerator: None*, nessuna quota GPU) fanno la calibrazione annidata,
+   che riprende da dove si era fermata (`postprocess_memo.npz`), e scrivono il
+   `submission.csv` calibrato dalle mappe già calcolate.
 3. **Invio su Kaggle** di `submission.csv` (max 5 al giorno; sceglierne fino
    a 2 finali).
 4. **Ablation** nei limiti della quota (§5.4).
