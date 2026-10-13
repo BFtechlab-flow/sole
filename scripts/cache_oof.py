@@ -55,7 +55,10 @@ def main():
     ap.add_argument("--tta", choices=["config", "on", "off"], default="config")
     ap.add_argument("--overwrite", action="store_true")
     ap.add_argument("--manifest", default=None)
+    ap.add_argument("--max-hours", type=float, default=None,
+                    help="stop cleanly before this budget (cached files are kept; rerun to resume)")
     args = ap.parse_args()
+    deadline = time.time() + 3600.0 * args.max_hours if args.max_hours else None
 
     cfg = load_yaml(args.config)
     seed_everything(cfg["seed"])
@@ -67,10 +70,20 @@ def main():
 
     manifest = {"config": args.config, "group_mode": mode, "tta": use_tta, "amp": bool(inf.get("amp", False)),
                 "device": device, "folds": {}}
+    manifest_path = Path(args.manifest) if args.manifest else Path(args.cache_dir) / "manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def write_manifest():
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
     for fold in selected:
         weights = Path(args.weights_pattern.format(fold=fold))
         if not weights.exists():
             raise FileNotFoundError(weights)
+        # recorded before any file is written, so that partial caches can be traced to their weights
+        manifest["folds"][str(fold)] = {"weights": str(weights), "weights_sha256": sha256_file(weights),
+                                        "complete": False}
+        write_manifest()
         model = load_models(cfg, [weights], device)[0]
         files = sorted({records[i]["file_name"] for i in np.where(folds == fold)[0]})
         written, t0 = 0, time.time()
@@ -78,6 +91,9 @@ def main():
             out_path = cache_path(args.cache_dir, fold, file_name)
             if not args.overwrite and available_prediction(out_path):
                 continue
+            if deadline is not None and time.time() > deadline:
+                print(f"time budget used (fold {fold}, {pos - 1}/{len(files)} images): rerun to continue", flush=True)
+                raise SystemExit(0)
             image = cv2.imread(str(Path(image_dir) / file_name), cv2.IMREAD_GRAYSCALE)
             if image is None:
                 raise FileNotFoundError(Path(image_dir) / file_name)
@@ -87,18 +103,16 @@ def main():
             written += 1
             if pos % 10 == 0 or pos == len(files):
                 print(f"fold={fold} cached={pos}/{len(files)}", flush=True)
-        manifest["folds"][str(fold)] = {
-            "weights": str(weights), "weights_sha256": sha256_file(weights),
-            "validation_images": len(files), "new_cache_files": written,
+        manifest["folds"][str(fold)].update({
+            "complete": True, "validation_images": len(files), "new_cache_files": written,
             "seconds": round(time.time() - t0, 1),
-        }
+        })
+        write_manifest()
         del model
         if device == "cuda":
             torch.cuda.empty_cache()
 
-    manifest_path = Path(args.manifest) if args.manifest else Path(args.cache_dir) / "manifest.json"
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    write_manifest()
     print(json.dumps(manifest, indent=2))
 
 

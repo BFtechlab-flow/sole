@@ -23,7 +23,7 @@ per GPU. In the second session (two folds in parallel, 4 vCPUs) epochs took
 limit (only ~10 % more throughput than one GPU). Building a training sample
 was then made 1.8× faster with bit-identical results (channels computed on
 the patch, per-worker caches; `tests/test_channels_window.py`). OOF caching + calibration
-+ test inference: budget `POST_TRAINING_HOURS = 4.5` h.
++ test inference: see the session plan below (measured in the third session).
 
 ## One-time setup
 
@@ -51,17 +51,25 @@ The first cell of section 4 prints the progress of every fold
 (`fold k: e/30 epochs`). `RESUME_FROM` is only needed to force a specific
 folder.
 
-Steps 5–10 (OOF predictions, official OOF evaluation, nested calibration,
-ablation plan, `submission.csv`, figures, weights manifest) start
-automatically in the first session where every fold is finished **and** at
-least `POST_TRAINING_HOURS` remain; otherwise the notebook says so and the next
-session (with the previous output attached) does them without retraining.
+After training, the remaining steps are split by the resource they need and
+every one of them stops cleanly before the end of the session and resumes in
+the next one (never rely on Kaggle's 12 h limit: a run killed by it may lose
+its output).
+
+| session | accelerator | what runs | measured / expected time |
+|---|---|---|---|
+| D | **GPU T4 × 2** | OOF cache of the 707 training images (one fold model each) on one GPU, test maps of the 180 test images (5-fold ensemble, TTA) on the other, `submission_default.csv`, official OOF evaluation | OOF cache 66 min on one T4 (measured), test maps ≈ 1.5 h (estimate) |
+| E, … | **None** (CPU only, no GPU quota) | nested post-processing calibration (`postprocess_memo.npz` keeps every evaluated setting), then the calibrated `submission.csv` from the cached test maps | ≈ 100 s per candidate setting on 300 OOF images with 4 CPUs (measured); a full nested search is several hundred candidates, i.e. one or two CPU sessions |
+
+The OOF cache (~5 GB), the test maps and the calibration memo are saved in the
+output (`artifacts/`) and restored from the attached previous output only when
+they were produced by exactly the current checkpoints (SHA-256 check).
+`CALIBRATE_WITH_GPU = True` runs the calibration in a GPU session too (it
+does not use the GPU).
 
 Kaggle's preinstalled packages (and its CUDA build of `torch`) are kept; only
 packages of `requirements.txt` that are missing are installed, and the versions
-actually used are saved in `artifacts/environment.txt`. The OOF maps (~5 GB)
-go to `/tmp` (`OOF_DIR`): they are rebuilt in the session that needs them and
-are not part of the saved output.
+actually used are saved in `artifacts/environment.txt`.
 
 The calibration searches on `POSTPROCESS_IMAGES_PER_FOLD = 60` images per fold
 by default (CPU-bound); the tuned setting is then evaluated on **all** OOF
