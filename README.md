@@ -54,8 +54,8 @@ python -m pytest -q                           # ~3 min on CPU, includes the end-
 ```
 
 `tests/test_notebook_smoke.py` executes every cell of the notebook in smoke
-mode; in Jupyter or Kaggle the notebook runs as is (`MODE = "smoke"` by
-default, `"full"` for the official data).
+mode; in Jupyter or Kaggle the notebook runs as is (`MODE = "full"`
+automatically when the competition data are attached, `"smoke"` otherwise).
 
 The **smoke mode** runs the whole pipeline on a tiny synthetic dataset
 (`tools/make_synthetic_dataset.py`: artificial curves, not solar data) to prove

@@ -40,7 +40,13 @@ def logged_epochs(log_path) -> int:
 
 
 def find_checkpoint_dirs(roots, exclude=("competitions",)) -> list[Path]:
-    """Directories below ``roots`` that contain ``fold*_last.pt`` files."""
+    """Directories below ``roots`` that contain ``fold*_last.pt`` files.
+
+    Smoke-mode runs keep their (synthetic-data) checkpoints in
+    ``artifacts/checkpoints``; the official runs use ``<repo>/checkpoints``.
+    The smoke ones are never returned, so attaching the output of a smoke run
+    cannot replace real checkpoints.
+    """
     dirs = set()
     for root in map(Path, roots):
         if not root.is_dir():
@@ -49,7 +55,7 @@ def find_checkpoint_dirs(roots, exclude=("competitions",)) -> list[Path]:
         for child in root.iterdir():
             if child.is_dir() and child.name not in exclude:  # the competition data hold no checkpoint
                 dirs.update(p.parent for p in child.rglob("fold*_last.pt"))
-    return sorted(dirs)
+    return sorted(d for d in dirs if d.parent.name != "artifacts")
 
 
 def collect_previous_checkpoints(sources, dest, n_folds: int, log=print) -> dict:

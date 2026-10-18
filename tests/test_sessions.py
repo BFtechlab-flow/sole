@@ -30,6 +30,7 @@ def test_find_and_collect_most_advanced_copy(tmp_path):
     _fold_files(s1, 1, 21, "s1")
     _fold_files(s2, 1, 30, "s2")  # a later session finished fold 1
     _fold_files(inp / "competitions" / "x", 2, 30, "never")  # excluded tree
+    _fold_files(inp / "fila-net-smoke" / "sole" / "artifacts" / "checkpoints", 3, 1, "smoke")  # smoke run: ignored
     found = find_checkpoint_dirs([inp])
     assert found == sorted([s1, s2])
 
