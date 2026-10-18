@@ -34,7 +34,8 @@ the patch, per-worker caches; `tests/test_channels_window.py`). OOF caching + ca
 2. *Add Input → Competition*: **Solar Filament Segmentation Challenge 2026**.
 3. *Settings*: Accelerator **GPU T4 × 2** (or one T4 / P100), **Internet on** (needed for
    `git clone`, `pip` and the ImageNet weights downloaded by `timm`).
-4. Run once with `MODE = "smoke"` (about 2 minutes) to check the environment.
+4. `MODE` is `"full"` automatically when the competition data are attached; set
+   `MODE = "smoke"` for a 2-minute check of the environment on synthetic data.
 
 ## Session plan
 
@@ -44,7 +45,7 @@ output (checkpoints, logs, figures, metrics).
 
 | session | settings cell | produces |
 |---|---|---|
-| A | `MODE = "full"` | as many epochs/folds as fit in `SESSION_HOURS`: `fold*_best.pt`, `fold*_last.pt`, `fold*_log.jsonl` |
+| A | nothing to change (`MODE` is `"full"` with the competition data attached) | as many epochs/folds as fit in `SESSION_HOURS`: `fold*_best.pt`, `fold*_last.pt`, `fold*_log.jsonl` |
 | B, C, … | nothing to change: *Add Input → Your Work → Notebooks* → the previous version of this notebook | the notebook finds the previous checkpoints in `/kaggle/input`, restores the most advanced copy of every fold, skips finished folds and resumes the others from `fold*_last.pt` |
 
 The first cell of section 4 prints the progress of every fold
