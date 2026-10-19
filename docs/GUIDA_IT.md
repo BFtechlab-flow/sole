@@ -223,6 +223,15 @@ distanza e i filamenti durano giorni, quindi due immagini dello stesso giorno
 sono quasi duplicati. Se finissero in fold diversi il punteggio di
 validazione sarebbe gonfiato.
 
+L'assegnazione è **congelata** in `artifacts/folds.csv` (sezione 1 del
+notebook): si prende da `configs/folds_day5.csv` se presente, altrimenti
+dalla struttura della cache OOF di una sessione precedente, e si calcola solo
+la prima volta. `GroupKFold` di scikit-learn risolve i pareggi in modo
+diverso a seconda della versione: le immagini Kaggle con CPU e con GPU davano
+fold diversi, e ricalcolarli avrebbe messo immagini di training nei fold di
+validazione. Il notebook controlla anche che ogni checkpoint sia stato
+validato sul numero di osservazioni del suo fold congelato.
+
 ### 5.2 Predizioni out-of-fold (OOF)
 
 Ogni immagine di training viene predetta dal modello che **non** l'ha vista

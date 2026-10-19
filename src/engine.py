@@ -91,7 +91,7 @@ def load_records_and_folds(cfg):
     root, train_json, train_images, _ = data_paths(cfg)
     records = load_coco_records(train_json)
     mode = cfg.get("cv", {}).get("group_mode", "observation")
-    folds = fold_assignments(records, cfg["n_folds"], mode)
+    folds = fold_assignments(records, cfg["n_folds"], mode, fold_file=cfg.get("cv", {}).get("fold_file"))
     assert_group_isolation(records, folds, mode)
     return records, folds, train_images, mode
 

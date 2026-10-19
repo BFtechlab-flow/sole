@@ -69,6 +69,13 @@ they were produced by exactly the current checkpoints (SHA-256 check).
 `CALIBRATE_WITH_GPU = True` runs the calibration in a GPU session too (it
 does not use the GPU).
 
+The fold assignment is frozen in `artifacts/folds.csv` (notebook section 1):
+from `configs/folds_day5.csv` when committed, else from the layout of a
+previous OOF cache, else computed once. scikit-learn's `GroupKFold` broke ties
+differently on Kaggle's CPU image than on the GPU image (measured: 543 of 707
+observations moved), so never let a later session recompute it. Commit the
+`folds.csv` of the session that cached the OOF maps as `configs/folds_day5.csv`.
+
 Kaggle's preinstalled packages (and its CUDA build of `torch`) are kept; only
 packages of `requirements.txt` that are missing are installed, and the versions
 actually used are saved in `artifacts/environment.txt`.
