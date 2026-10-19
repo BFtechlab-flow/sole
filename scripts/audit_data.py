@@ -108,7 +108,7 @@ def main():
     sizes = sorted({(r["height"], r["width"]) for r in records})
     missing = sorted({r["file_name"] for r in records if not (image_dir / r["file_name"]).exists()})
     mode = cfg.get("cv", {}).get("group_mode", "observation")
-    folds = fold_assignments(records, cfg["n_folds"], mode)
+    folds = fold_assignments(records, cfg["n_folds"], mode, fold_file=cfg.get("cv", {}).get("fold_file"))
     assert_group_isolation(records, folds, mode)
 
     degenerate, empty, overlapping_records, overlap_pairs = 0, 0, 0, 0
