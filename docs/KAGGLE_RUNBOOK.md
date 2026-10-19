@@ -60,9 +60,10 @@ its output).
 | session | accelerator | what runs | measured / expected time |
 |---|---|---|---|
 | D | **GPU T4 × 2** | OOF cache of the 707 training images (one fold model each) on one GPU, test maps of the 180 test images (5-fold ensemble, TTA) on the other, `submission_default.csv`, official OOF evaluation | OOF cache 66 min on one T4 (measured), test maps ≈ 1.5 h (estimate) |
-| E, … | **None** (CPU only, no GPU quota) | nested post-processing calibration (`postprocess_memo.npz` keeps every evaluated setting), then the calibrated `submission.csv` from the cached test maps | ≈ 100 s per candidate setting on 300 OOF images with 4 CPUs (measured); a full nested search is several hundred candidates, i.e. one or two CPU sessions |
+| E, … | **None** (CPU only, no GPU quota) | nested post-processing calibration (`postprocess_memo.npz` keeps every evaluated setting), then the learned instance rescoring (`train_rescorer.py`, feature cache resumable), then the calibrated `submission.csv` from the cached test maps | ≈ 100 s per candidate setting on 300 OOF images with 4 CPUs (measured); a full nested search is several hundred candidates, i.e. one or two CPU sessions |
 
-The OOF cache (~5 GB), the test maps and the calibration memo are saved in the
+The OOF cache (~5 GB), the test maps, the calibration memo and the rescoring
+feature cache are saved in the
 output (`artifacts/`) and restored from the attached previous output only when
 they were produced by exactly the current checkpoints (SHA-256 check).
 `CALIBRATE_WITH_GPU = True` runs the calibration in a GPU session too (it

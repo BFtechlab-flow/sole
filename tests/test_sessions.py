@@ -109,6 +109,9 @@ def test_restore_post_training_artifacts_only_from_the_same_checkpoints(tmp_path
     np.savez_compressed(stale / "postprocess_memo.npz", signature=np.array("s"), tokens=np.array(["a"]),
                         counts=np.zeros((1, 3, 4)), entry_folds=np.zeros(3, int))
 
+    (prev / "rescoring" / "cache" / "sig1" / "set").mkdir(parents=True)
+    (prev / "rescoring" / "cache" / "sig1" / "set" / "fold0_a.npz").write_text("features")
+
     art = tmp_path / "work" / "artifacts"
     summary = restore_post_training_artifacts([stale, prev], art, weights, log=lambda *_: None)
     assert summary["oof_folds"] == {"0": 1}
@@ -118,3 +121,5 @@ def test_restore_post_training_artifacts_only_from_the_same_checkpoints(tmp_path
     assert restored_manifest["folds"] == {"0": {"weights_sha256": sha[0]}}
     assert (art / "test_maps" / "t1.npz").exists() and not (art / "test_maps" / "t2.npz").exists()
     assert summary["memo"]["candidates"] == 2 and "input" in summary["memo"]["from"]
+    assert (art / "rescoring" / "cache" / "sig1" / "set" / "fold0_a.npz").read_text() == "features"
+    assert summary["rescoring_features"] == 1

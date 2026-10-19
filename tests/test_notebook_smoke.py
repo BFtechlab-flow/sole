@@ -53,3 +53,5 @@ def test_notebook_runs_end_to_end_in_smoke_mode(tmp_path, monkeypatch):
     text = (art / "submission.csv").read_text()
     assert text.startswith("filament_id,segmentation_rle\n") and '"' not in text
     assert namespace["MODE"] == "smoke"
+    rescoring = json.loads((art / "rescoring" / "rescoring.json").read_text())
+    assert rescoring["complete"] and rescoring["reconstruction_settings_nested"]

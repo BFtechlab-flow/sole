@@ -31,10 +31,9 @@ import cv2
 import pandas as pd
 import torch
 
-from src.engine import load_models, postprocess_params, predict_label_map
+from src.engine import load_models, postprocess_maps, predict_label_map
 from src.evaluation import label_map_to_rles
 from src.oof import RECONSTRUCTION_KEYS, available_prediction, load_prediction, save_prediction
-from src.reconstruct import reconstruct_label_map
 from src.submission import save_verification, validate_submission_file, write_submission
 from src.utils import data_paths, image_files, load_yaml
 
@@ -111,11 +110,7 @@ def main():
         image_shapes[path.stem] = gray.shape
         if path.stem in cached:
             pred = load_prediction(maps_dir / f"{path.stem}.npz", keys=RECONSTRUCTION_KEYS)
-            labels, _ = reconstruct_label_map(
-                pred["region"], pred["centerline"], pred["boundary"], pred["distance"],
-                orientation=pred.get("orientation"), width=pred.get("width"),
-                instance_embedding=pred.get("instance_embedding"), **postprocess_params(cfg),
-            )
+            labels, _ = postprocess_maps(pred, cfg)
         else:
             labels, _, pred = predict_label_map(models, gray, cfg, device)
             predicted += 1
