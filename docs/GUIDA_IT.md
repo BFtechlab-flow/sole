@@ -240,6 +240,28 @@ la **stima annidata** (`nested_micro_pq`), il numero onesto da riportare.
 Poi si sceglie la configurazione finale su tutti i fold e la si salva in
 `configs/filanet_tuned.yaml` per il test.
 
+### 5.3b Filtro appreso dei filamenti — `scripts/train_rescorer.py`, `src/rescore.py`
+
+Sui dati OOF la maggior parte degli errori sono **falsi positivi**. Con la
+metrica ufficiale la decisione su ogni filamento predetto è **separabile**:
+togliere il filamento `j` non cambia gli altri (le predizioni sono disgiunte,
+quindi un filamento vero è colpito al più da una predizione). Se `a_j` è la
+somma delle IoU dei suoi abbinamenti nelle voci degli annotatori e `d_j` la
+sua quota del denominatore (1/2 per voce), tenere l'insieme `K` dà
+esattamente `PQ = Σ a_j / (G/2 + Σ d_j)`; conviene tenere `j` solo se
+`a_j / d_j > PQ`. Il test `tests/test_rescore.py` lo verifica contro lo
+scorer ufficiale.
+
+Un piccolo modello (gradient boosting di scikit-learn) stima questo
+contributo da caratteristiche delle mappe predette (area, confidenza,
+evidenza di centerline e bordo, forma, posizione sul disco, vicini) e i
+filamenti sotto una soglia vengono scartati. Stima **annidata**: per ogni
+fold esterno si usano i parametri di ricostruzione scelti senza di esso, la
+soglia si sceglie con una validazione incrociata interna sugli altri fold e
+il modello si addestra solo sugli altri fold. Il filtro viene attivato nella
+config solo se la stima annidata migliora. `rescoring.json` riporta anche il
+"tetto" di un filtro perfetto (oracolo, non raggiungibile).
+
 ### 5.4 Ablation — `scripts/run_*_ablation.py`, `scripts/compare_oof_experiments.py`
 
 Un componente resta solo se migliora il PQ OOF in un confronto **appaiato**
@@ -286,12 +308,14 @@ Attenzione: la loss di ricostruzione del pre-addestramento che scende
    mappe del test (due GPU in parallelo), scrive `submission_default.csv` e
    la valutazione OOF ufficiale; poi una o due sessioni **senza GPU**
    (*Accelerator: None*, nessuna quota GPU) fanno la calibrazione annidata,
-   che riprende da dove si era fermata (`postprocess_memo.npz`), e scrivono il
-   `submission.csv` calibrato dalle mappe già calcolate.
+   che riprende da dove si era fermata (`postprocess_memo.npz`), poi il
+   filtro appreso dei filamenti (§5.3b), e scrivono il `submission.csv`
+   calibrato dalle mappe già calcolate.
 3. **Invio su Kaggle** di `submission.csv` (max 5 al giorno; sceglierne fino
    a 2 finali).
 4. **Ablation** nei limiti della quota (§5.4).
-5. **Pesi**: Release GitHub `v1.0` + `weights/manifest.json` +
+5. **Pesi**: Release GitHub `v1.0` (i `fold*_best.pt` e, se il filtro è
+   attivo, `rescorer.joblib`) + `weights/manifest.json` +
    `configs/filanet_tuned.yaml` nel repository.
 6. **Report**: `report/report_draft.tex` nel template Overleaf, con i numeri
    dei file `artifacts/*` (checklist in `docs/final_submission_checklist.md`).

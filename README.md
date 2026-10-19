@@ -86,6 +86,10 @@ python scripts/evaluate_oof.py --cache-dir artifacts/oof_cache --export-dir arti
 # 4. nested post-processing calibration -> configs/filanet_tuned.yaml
 python scripts/optimize_postprocess.py --cache-dir artifacts/oof_cache --write-config configs/filanet_tuned.yaml
 
+# 4b. learned instance rescoring (nested estimate; enabled in the config only if it helps)
+python scripts/train_rescorer.py --config configs/filanet_tuned.yaml --search-json artifacts/postprocess_search.json \
+    --cache-dir artifacts/oof_cache --write-config configs/filanet_tuned.yaml
+
 # 5. ablations (dry run writes the plan; --execute runs it; screen with --folds 0 --epochs 8)
 python scripts/run_ablation.py            # baseline → +topology → +orientation → +bridge → +TTA → +full-res
 python scripts/run_innovation_ablation.py # the ten V2 components, one at a time
@@ -131,6 +135,11 @@ frames (masked reconstruction) and `scripts/train.py --encoder-weights` loads it
   and a confidence filter. Under micro PQ an instance is worth keeping only if
   `P(match) × IoU > PQ / 2`, so the minimum confidence is calibrated on OOF
   predictions with a nested procedure.
+* **Learned rescoring** — the official micro PQ is exactly separable per
+  predicted instance (predictions are disjoint), so a gradient-boosted
+  regressor on map features predicts each instance's contribution and the
+  ones below a threshold are dropped; cross-fitted, nested estimate,
+  enabled only if it improves the held-out folds (`src/rescore.py`).
 
 Every optional component is switchable from the config and has an ablation
 entry: a component stays in the final model only if the paired OOF comparison

@@ -10,8 +10,9 @@
   wall-clock time does. The same scheduler runs the GPU steps after training
   (OOF cache, test maps).
 * ``restore_post_training_artifacts`` brings back the OOF cache, the cached
-  test maps and the calibration memo of a previous session, but only when
-  they were produced by exactly the current fold checkpoints (SHA-256).
+  test maps, the calibration memo and the rescoring feature cache of a
+  previous session, but only when they were produced by exactly the current
+  fold checkpoints (SHA-256).
 """
 from __future__ import annotations
 
@@ -222,6 +223,10 @@ def restore_post_training_artifacts(previous_artifacts, art, fold_weights, log=p
                 info = {}
             if info.get("weights_sha256") == current:
                 summary["test_maps"] += _copy_missing(maps, art / "test_maps")
+        feats = prev / "rescoring" / "cache"  # one sub-directory per OOF-weights signature: never stale
+        if feats.is_dir():
+            summary["rescoring_features"] = summary.get("rescoring_features", 0) + _copy_missing(
+                feats, art / "rescoring" / "cache")
         memo = prev / "postprocess_memo.npz"
         if memo.is_file():
             size = _memo_size(memo)
@@ -234,6 +239,8 @@ def restore_post_training_artifacts(previous_artifacts, art, fold_weights, log=p
         log(f"restored {n} OOF map(s) of fold {f}")
     if summary["test_maps"]:
         log(f"restored {summary['test_maps']} cached test file(s)")
+    if summary.get("rescoring_features"):
+        log(f"restored {summary['rescoring_features']} cached rescoring feature file(s)")
     if summary["memo"]:
         log(f"restored the calibration memo ({best_size} evaluated candidates) from {best_memo}")
     return summary

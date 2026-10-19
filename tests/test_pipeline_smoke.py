@@ -116,6 +116,29 @@ def test_full_pipeline_on_synthetic_data(tmp_path):
     assert json.loads(sub_maps.with_suffix(".verification.json").read_text())["runtime"][
         "images_post_processed_from_cached_maps"] == 3
 
+    # learned rescoring: resumable extraction, nested estimate, then the same instances from maps or a fresh run
+    resc_args = ["scripts/train_rescorer.py", "--config", str(tuned), "--search-json", str(art / "search.json"),
+                 "--cache-dir", str(art / "oof"), "--output-dir", str(art / "rescoring"), "--workers", "2"]
+    run(resc_args + ["--max-hours", "0.000001"], env)
+    assert json.loads((art / "rescoring" / "rescoring.json").read_text())["complete"] is False
+    rescored = tmp_path / "tuned_rescored.yaml"
+    run(resc_args + ["--write-config", str(rescored)], env)
+    rep = json.loads((art / "rescoring" / "rescoring.json").read_text())
+    assert rep["complete"] and rep["reconstruction_settings_nested"]
+    assert {"nested_micro_pq_with_rescoring", "nested_micro_pq_without_rescoring", "final_threshold",
+            "oracle_filtering_ceiling_micro_pq"} <= set(rep)
+    assert rep["oracle_filtering_ceiling_micro_pq"] >= rep["all_instances_micro_pq"] - 1e-12
+    rcfg = yaml.safe_load(rescored.read_text())
+    assert rcfg["rescoring"]["enabled"] == (rep["nested_micro_pq_with_rescoring"] > rep["nested_micro_pq_without_rescoring"])
+    rcfg["rescoring"]["enabled"] = True  # exercise the inference hook whatever the synthetic result
+    rescored.write_text(yaml.safe_dump(rcfg))
+    sub_r_maps, sub_r_fresh = tmp_path / "submission_r_maps.csv", tmp_path / "submission_r_fresh.csv"
+    run(["scripts/infer.py", "--config", str(rescored), "--maps-dir", str(art / "test_maps"), "--output",
+         str(sub_r_maps)], env)
+    run(["scripts/infer.py", "--config", str(rescored), "--weights", *weights, "--output", str(sub_r_fresh)], env)
+    assert sub_r_maps.read_text() == sub_r_fresh.read_text()
+    assert len(sub_r_maps.read_text().splitlines()) <= len(text.splitlines())
+
     out = run(["scripts/run_ablation.py", "--config", str(cfg_path), "--output-dir", str(art / "abl"),
                "--folds", "0", "--epochs", "1"], env)
     manifest = json.loads((art / "abl" / "manifest.json").read_text())
