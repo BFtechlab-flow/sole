@@ -110,7 +110,7 @@ def main():
         image_shapes[path.stem] = gray.shape
         if path.stem in cached:
             pred = load_prediction(maps_dir / f"{path.stem}.npz", keys=RECONSTRUCTION_KEYS)
-            labels, _ = postprocess_maps(pred, cfg)
+            labels, _ = postprocess_maps(pred, cfg, image=gray)
         else:
             labels, _, pred = predict_label_map(models, gray, cfg, device)
             predicted += 1

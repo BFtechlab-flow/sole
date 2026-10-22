@@ -138,3 +138,49 @@ def test_contributions_ignore_unscored_entries():
     a1, d1, g1 = instance_contributions(s, int(labels.max()))
     a0, d0, g0 = instance_contributions(score_image(records, label_map_to_rles(labels)), int(labels.max()))
     assert np.array_equal(a0, a1) and np.array_equal(d0, d1) and g0 == g1
+
+
+def test_image_features_see_dark_filaments():
+    from src.rescore import IMAGE_FEATURE_NAMES, features_for, image_features
+
+    gray = np.full((H, W), 180, np.uint8)
+    labels = np.zeros((H, W), np.int32)
+    labels[30:36, 20:80] = 1          # a dark filament
+    gray[30:36, 20:80] = 60
+    labels[80:86, 20:80] = 2          # a "filament" with no contrast
+    xi = image_features(labels, gray)
+    assert xi.shape == (2, len(IMAGE_FEATURE_NAMES)) and np.isfinite(xi).all()
+    c = IMAGE_FEATURE_NAMES.index("img_contrast")
+    assert xi[0, c] > 0.5 and abs(xi[1, c]) < 1e-6
+    pred = {k: np.full((H, W), 0.5, np.float32) for k in ("region", "centerline", "boundary", "distance")}
+    assert features_for(labels, pred, "maps+image", gray).shape == (2, len(FEATURE_NAMES) + len(IMAGE_FEATURE_NAMES))
+    with pytest.raises(ValueError, match="needs the grayscale image"):
+        features_for(labels, pred, "maps+image", None)
+
+
+def test_postprocess_maps_uses_candidate_overrides(tmp_path):
+    import joblib
+
+    from src.engine import postprocess_maps
+    from src.rescore import FEATURE_SETS, FEATURES_VERSION
+
+    rng = np.random.default_rng(0)
+    region = np.zeros((H, W), np.float32)
+    region[20:28, 10:90] = 0.9   # confident
+    region[60:66, 10:60] = 0.5   # weak: removed by min_instance_score 0.7
+    pred = {"region": region, "centerline": region.copy(), "boundary": np.zeros_like(region),
+            "distance": region.copy()}
+    cfg = {"inference": {"region_threshold": 0.45, "center_threshold": 0.35, "min_region_area": 16,
+                         "min_instance_area": 50, "min_instance_score": 0.7, "bridge_max_distance": 0}}
+    labels, _ = postprocess_maps(pred, cfg)
+    assert labels.max() == 1
+    x = rng.random((50, len(FEATURE_SETS["maps"])))
+    model = fit_model(x, np.ones(50))  # keeps everything
+    path = tmp_path / "r.joblib"
+    joblib.dump({"model": model, "feature_set": "maps", "feature_names": FEATURE_SETS["maps"],
+                 "features_version": FEATURES_VERSION}, path)
+    cfg["rescoring"] = {"enabled": True, "model": str(path), "threshold": 0.5,
+                        "candidate_overrides": {"min_instance_score": 0.0}}
+    labels, _ = postprocess_maps(pred, cfg)
+    assert labels.max() == 2  # the weak candidate is back, and the learned filter kept it
+

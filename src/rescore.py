@@ -33,11 +33,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import cv2
 import numpy as np
 from scipy.ndimage import binary_dilation, find_objects
 from skimage.morphology import skeletonize
 
-FEATURES_VERSION = 1
+FEATURES_VERSION = 2
 FEATURE_NAMES = (
     "area", "log_area",
     "region_mean", "region_max", "region_p10", "region_frac_gt_0p7",
@@ -51,6 +52,14 @@ FEATURE_NAMES = (
     "image_instances", "image_score_rank", "image_foreground_fraction", "nearest_instance_distance",
 )
 RING = 3  # pixels
+# Features of the H-alpha test image itself (filaments are dark, elongated absorption features).
+# Only the image being segmented is used, as the competition requires.
+IMAGE_FEATURE_NAMES = (
+    "img_mean", "img_p10", "img_std", "img_ring_mean", "img_contrast", "img_background_contrast",
+    "img_ridge_mean",
+)
+FEATURE_SETS = {"maps": FEATURE_NAMES, "maps+image": FEATURE_NAMES + IMAGE_FEATURE_NAMES}
+IMG_RING, IMG_BACKGROUND = 4, 15  # pixels
 
 
 def instance_features(labels: np.ndarray, pred: dict) -> np.ndarray:
@@ -109,6 +118,58 @@ def instance_features(labels: np.ndarray, pred: dict) -> np.ndarray:
     else:
         out[:, 24] = 1.0
     return out
+
+
+def normalised_image(gray: np.ndarray):
+    """Robustly normalised intensity (1st-99th percentile -> 0-1) and its ridge response (DoG)."""
+    x = np.asarray(gray, np.float32)
+    lo, hi = np.percentile(x, [1, 99])
+    raw = np.clip((x - lo) / (hi - lo + 1e-8), 0, 1).astype(np.float32)
+    ridge = cv2.GaussianBlur(raw, (0, 0), 5.0) - cv2.GaussianBlur(raw, (0, 0), 1.2)  # dark ridges -> positive
+    return raw, ridge
+
+
+def image_features(labels: np.ndarray, gray: np.ndarray) -> np.ndarray:
+    """``(n_instances, len(IMAGE_FEATURE_NAMES))`` features of the grayscale image, in label order."""
+    n = int(labels.max())
+    out = np.zeros((n, len(IMAGE_FEATURE_NAMES)), np.float32)
+    if n == 0:
+        return out
+    if gray.shape != labels.shape:
+        raise ValueError(f"image {gray.shape} and labels {labels.shape} differ")
+    raw, ridge = normalised_image(gray)
+    h, w = labels.shape
+    pad = IMG_BACKGROUND + 1
+    k_ring = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * IMG_RING + 1, 2 * IMG_RING + 1))
+    k_bg = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * IMG_BACKGROUND + 1, 2 * IMG_BACKGROUND + 1))
+    for i, sl in enumerate(find_objects(labels)):
+        if sl is None:
+            continue
+        y0, y1 = max(sl[0].start - pad, 0), min(sl[0].stop + pad, h)
+        x0, x1 = max(sl[1].start - pad, 0), min(sl[1].stop + pad, w)
+        m = (labels[y0:y1, x0:x1] == i + 1).astype(np.uint8)
+        near = cv2.dilate(m, k_ring).astype(bool)
+        far = cv2.dilate(m, k_bg).astype(bool)
+        inside = m.astype(bool)
+        ring = near & ~inside
+        background = far & ~near
+        r = raw[y0:y1, x0:x1]
+        v = r[inside]
+        ring_mean = float(r[ring].mean()) if ring.any() else float(v.mean())
+        bg_mean = float(r[background].mean()) if background.any() else ring_mean
+        out[i] = (v.mean(), np.percentile(v, 10), v.std(), ring_mean, ring_mean - v.mean(), bg_mean - v.mean(),
+                  ridge[y0:y1, x0:x1][inside].mean())
+    return out
+
+
+def features_for(labels: np.ndarray, pred: dict, feature_set: str = "maps", image=None) -> np.ndarray:
+    if feature_set == "maps":
+        return instance_features(labels, pred)
+    if feature_set == "maps+image":
+        if image is None:
+            raise ValueError("this rescorer needs the grayscale image (feature set 'maps+image')")
+        return np.hstack([instance_features(labels, pred), image_features(labels, image)])
+    raise ValueError(f"unknown feature set {feature_set!r}")
 
 
 def instance_contributions(entry_scores, n_instances: int):
@@ -195,10 +256,18 @@ def load_rescorer(path):
     key = str(path.resolve())
     if key not in _LOADED:
         bundle = joblib.load(path)
-        if bundle.get("features_version") != FEATURES_VERSION or tuple(bundle["feature_names"]) != FEATURE_NAMES:
+        feature_set = bundle.setdefault("feature_set", "maps")
+        if (bundle.get("features_version") != FEATURES_VERSION or feature_set not in FEATURE_SETS
+                or tuple(bundle["feature_names"]) != FEATURE_SETS[feature_set]):
             raise ValueError(f"{path}: rescorer built for other features; rerun scripts/train_rescorer.py")
         _LOADED[key] = bundle
     return _LOADED[key]
+
+
+def candidate_overrides(cfg) -> dict:
+    """Reconstruction settings replaced when the rescoring is enabled (e.g. a permissive candidate set)."""
+    sec = (cfg or {}).get("rescoring") or {}
+    return dict(sec.get("candidate_overrides") or {}) if sec.get("enabled") and sec.get("model") else {}
 
 
 def rescoring_settings(cfg):
@@ -215,13 +284,16 @@ def rescoring_settings(cfg):
     return path, float(sec["threshold"])
 
 
-def apply_rescoring(labels: np.ndarray, pred: dict, model_path, threshold: float):
-    """Drop the instances whose predicted contribution is below ``threshold``; relabel 1..K."""
+def apply_rescoring(labels: np.ndarray, pred: dict, model_path, threshold: float, image=None):
+    """Drop the instances whose predicted contribution is below ``threshold``; relabel 1..K.
+
+    ``image`` (the grayscale image being segmented) is required by 'maps+image' rescorers.
+    """
     n = int(labels.max())
     if n == 0:
         return labels, np.zeros(0, np.float32)
     bundle = load_rescorer(model_path)
-    y = bundle["model"].predict(instance_features(labels, pred).astype(np.float64))
+    y = bundle["model"].predict(features_for(labels, pred, bundle["feature_set"], image).astype(np.float64))
     keep = y >= float(threshold)
     remap = np.zeros(n + 1, np.int32)
     remap[1:][keep] = np.arange(1, int(keep.sum()) + 1, dtype=np.int32)
