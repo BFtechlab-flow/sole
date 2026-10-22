@@ -20,7 +20,7 @@ from .losses import total_loss
 from .model import FILANet
 from .oof import quantize_roundtrip
 from .reconstruct import reconstruct_label_map
-from .rescore import apply_rescoring, rescoring_settings
+from .rescore import apply_rescoring, candidate_overrides, rescoring_settings
 from .ssl_pretrain import load_ssl_encoder
 from .utils import data_paths, seed_everything
 
@@ -69,20 +69,25 @@ def predict_label_map(models, gray, cfg, device, tta=None):
     pred = ensemble_predict(models, build_input_channels(gray), device, inf["tile"], inf["overlap"], use_tta,
                             amp=bool(inf.get("amp", False)))
     pred = quantize_roundtrip(pred)
-    labels, scores = postprocess_maps(pred, cfg)
+    labels, scores = postprocess_maps(pred, cfg, image=gray)
     return labels, scores, pred
 
 
-def postprocess_maps(pred, cfg):
-    """Instances from (de)quantised maps: reconstruction, then the learned rescoring if the config enables it."""
+def postprocess_maps(pred, cfg, image=None):
+    """Instances from (de)quantised maps: reconstruction, then the learned rescoring if the config enables it.
+
+    With the rescoring enabled, its ``candidate_overrides`` replace reconstruction settings (the candidate set
+    the rescorer was trained on). ``image`` is the grayscale image being segmented (needed by image features).
+    """
+    params = dict(postprocess_params(cfg), **candidate_overrides(cfg))
     labels, scores = reconstruct_label_map(
         pred["region"], pred["centerline"], pred["boundary"], pred["distance"],
         orientation=pred.get("orientation"), width=pred.get("width"),
-        instance_embedding=pred.get("instance_embedding"), **postprocess_params(cfg),
+        instance_embedding=pred.get("instance_embedding"), **params,
     )
     rescoring = rescoring_settings(cfg)
     if rescoring is not None:
-        labels, scores = apply_rescoring(labels, pred, *rescoring)
+        labels, scores = apply_rescoring(labels, pred, *rescoring, image=image)
     return labels, scores
 
 

@@ -271,6 +271,17 @@ il modello si addestra solo sugli altri fold. Il filtro viene attivato nella
 config solo se la stima annidata migliora. `rescoring.json` riporta anche il
 "tetto" di un filtro perfetto (oracolo, non raggiungibile).
 
+Si confrontano tre varianti: (1) i filamenti della calibrazione con le sole
+caratteristiche delle mappe; (2) gli stessi con anche caratteristiche
+dell'immagine H-alpha da segmentare (scurezza e contrasto del filamento
+rispetto ai dintorni, risposta di cresta); (3) un insieme di candidati
+**permissivo** (nessun filtro di confidenza, area minima 100 px) con le
+caratteristiche dell'immagine, così decide solo il filtro appreso e si
+recuperano filamenti veri scartati dai filtri grezzi. Per ogni fold esterno
+la variante si sceglie con la validazione interna sugli altri fold, quindi
+anche la scelta della variante è annidata. L'immagine usata è solo quella
+che si sta segmentando, come richiesto dal regolamento.
+
 ### 5.4 Ablation — `scripts/run_*_ablation.py`, `scripts/compare_oof_experiments.py`
 
 Un componente resta solo se migliora il PQ OOF in un confronto **appaiato**
