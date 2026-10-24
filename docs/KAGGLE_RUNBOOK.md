@@ -128,3 +128,21 @@ python scripts/run_v3_ablation.py --config configs/filanet_v3.yaml --folds 0 --e
 Inference-only variants (graph bridge, TTA, geodesic repair) reuse the
 checkpoints of the previous variant and cost no training. Report every result,
 including the negative ones.
+
+## Screening a training change on one fold (`notebooks/screening_fold.ipynb`)
+
+Before retraining five folds, a candidate change is trained on fold 0 and
+compared with the existing fold-0 model on the same held-out observations
+(official micro PQ, paired bootstrap), with the default and with the
+calibrated post-processing. Default variants: `seed2` (same recipe, another
+seed: measures the seed noise and, as `baseline+seed2`, the gain of a 2-model
+ensemble per fold) and `convnext_small` (larger encoder).
+
+* New Kaggle notebook: *File → Import Notebook* with
+  `https://raw.githubusercontent.com/BFtechlab-flow/sole/main/notebooks/screening_fold.ipynb`.
+* Inputs: the competition data and the dataset made from the main notebook's
+  output (checkpoints, OOF cache, tuned config). *GPU T4 × 2*, *Internet on*.
+* The two trainings run in parallel; ConvNeXt-S is ~2× slower and may need a
+  second session (attach this notebook's own output: it resumes).
+* Its outputs live under `artifacts/screening/`, which the main notebook never
+  restores as fold checkpoints.

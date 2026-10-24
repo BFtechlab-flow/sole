@@ -45,8 +45,9 @@ def find_checkpoint_dirs(roots, exclude=("competitions",)) -> list[Path]:
 
     Smoke-mode runs keep their (synthetic-data) checkpoints in
     ``artifacts/checkpoints``; the official runs use ``<repo>/checkpoints``.
-    The smoke ones are never returned, so attaching the output of a smoke run
-    cannot replace real checkpoints.
+    The smoke ones and those of screening experiments (any ``screening``
+    folder) are never returned, so attaching such an output cannot replace
+    the real checkpoints.
     """
     dirs = set()
     for root in map(Path, roots):
@@ -56,7 +57,8 @@ def find_checkpoint_dirs(roots, exclude=("competitions",)) -> list[Path]:
         for child in root.iterdir():
             if child.is_dir() and child.name not in exclude:  # the competition data hold no checkpoint
                 dirs.update(p.parent for p in child.rglob("fold*_last.pt"))
-    return sorted(d for d in dirs if d.parent.name != "artifacts")
+    # smoke runs keep checkpoints in artifacts/checkpoints; screening experiments under .../screening/...
+    return sorted(d for d in dirs if d.parent.name != "artifacts" and "screening" not in d.parts)
 
 
 def collect_previous_checkpoints(sources, dest, n_folds: int, log=print) -> dict:
