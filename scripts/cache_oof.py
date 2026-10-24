@@ -25,7 +25,7 @@ import torch
 
 from src.data import build_input_channels
 from src.engine import load_models, load_records_and_folds
-from src.inference import predict_tiled
+from src.inference import ensemble_predict
 from src.oof import available_prediction, cache_path, save_prediction
 from src.utils import load_yaml, seed_everything
 
@@ -49,7 +49,8 @@ def resolve_tta(args, cfg):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", default="configs/filanet.yaml")
-    ap.add_argument("--weights-pattern", default="checkpoints/fold{fold}_best.pt")
+    ap.add_argument("--weights-pattern", nargs="+", default=["checkpoints/fold{fold}_best.pt"],
+                    help="one pattern per model; several patterns = per-fold ensemble (maps averaged as at test time)")
     ap.add_argument("--cache-dir", default="artifacts/oof_cache")
     ap.add_argument("--folds", nargs="*", type=int, default=None)
     ap.add_argument("--tta", choices=["config", "on", "off"], default="config")
@@ -77,14 +78,16 @@ def main():
         manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     for fold in selected:
-        weights = Path(args.weights_pattern.format(fold=fold))
-        if not weights.exists():
-            raise FileNotFoundError(weights)
+        weights = [Path(p.format(fold=fold)) for p in args.weights_pattern]
+        for w in weights:
+            if not w.exists():
+                raise FileNotFoundError(w)
+        shas = [sha256_file(w) for w in weights]
         # recorded before any file is written, so that partial caches can be traced to their weights
-        manifest["folds"][str(fold)] = {"weights": str(weights), "weights_sha256": sha256_file(weights),
-                                        "complete": False}
+        manifest["folds"][str(fold)] = {"weights": [str(w) for w in weights] if len(weights) > 1 else str(weights[0]),
+                                        "weights_sha256": "+".join(shas), "complete": False}
         write_manifest()
-        model = load_models(cfg, [weights], device)[0]
+        models = load_models(cfg, weights, device)
         files = sorted({records[i]["file_name"] for i in np.where(folds == fold)[0]})
         written, t0 = 0, time.time()
         for pos, file_name in enumerate(files, 1):
@@ -97,8 +100,8 @@ def main():
             image = cv2.imread(str(Path(image_dir) / file_name), cv2.IMREAD_GRAYSCALE)
             if image is None:
                 raise FileNotFoundError(Path(image_dir) / file_name)
-            pred = predict_tiled(model, build_input_channels(image), device, inf["tile"], inf["overlap"], use_tta,
-                                 amp=bool(inf.get("amp", False)))
+            pred = ensemble_predict(models, build_input_channels(image), device, inf["tile"], inf["overlap"], use_tta,
+                                    amp=bool(inf.get("amp", False)))
             save_prediction(out_path, pred)
             written += 1
             if pos % 10 == 0 or pos == len(files):
@@ -108,7 +111,7 @@ def main():
             "seconds": round(time.time() - t0, 1),
         })
         write_manifest()
-        del model
+        del models
         if device == "cuda":
             torch.cuda.empty_cache()
 

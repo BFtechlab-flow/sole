@@ -41,11 +41,17 @@ def make_model(cfg, pretrained: bool):
 
 
 def load_models(cfg, weights, device):
-    """Load fold checkpoints for inference (architecture from ``cfg``)."""
+    """Load fold checkpoints for inference.
+
+    The architecture comes from the ``model`` section saved in each checkpoint
+    (so an ensemble may mix encoders), else from ``cfg``.
+    """
     models = []
     for w in weights:
         ck = torch.load(w, map_location=device, weights_only=True)
-        model = make_model(cfg, pretrained=False).to(device)
+        saved = ck.get("config") if isinstance(ck.get("config"), dict) else None
+        arch_cfg = dict(cfg, model=saved["model"]) if saved and isinstance(saved.get("model"), dict) else cfg
+        model = make_model(arch_cfg, pretrained=False).to(device)
         model.load_state_dict(ck["model"])
         model.eval()
         models.append(model)
