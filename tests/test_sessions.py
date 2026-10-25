@@ -123,3 +123,11 @@ def test_restore_post_training_artifacts_only_from_the_same_checkpoints(tmp_path
     assert summary["memo"]["candidates"] == 2 and "input" in summary["memo"]["from"]
     assert (art / "rescoring" / "cache" / "sig1" / "set" / "fold0_a.npz").read_text() == "features"
     assert summary["rescoring_features"] == 1
+
+
+def test_screening_checkpoints_are_never_fold_checkpoints(tmp_path):
+    inp = tmp_path / "input"
+    real = inp / "run" / "sole" / "checkpoints"
+    _fold_files(real, 0, 30, "real")
+    _fold_files(inp / "screen" / "sole" / "artifacts" / "screening" / "seed2" / "checkpoints", 0, 40, "screen")
+    assert find_checkpoint_dirs([inp]) == [real]
