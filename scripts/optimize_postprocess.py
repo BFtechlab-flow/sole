@@ -88,6 +88,7 @@ class Evaluator:
                     weights[str(fold)] = info.get("weights_sha256")
             except (OSError, ValueError):
                 continue
+        self.oof_weights = weights
         payload = {"images": [(int(j[0]), j[1], len(j[2])) for j in self.jobs],
                    "metric": metric_cfg or {}, "oof_weights": weights}
         return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
@@ -111,7 +112,8 @@ class Evaluator:
         tmp = self.memo_path.with_name(self.memo_path.stem + ".tmp.npz")
         tokens = list(self.memo)
         np.savez_compressed(tmp, signature=np.array(self.signature), tokens=np.array(tokens),
-                            counts=np.stack([self.memo[t] for t in tokens]), entry_folds=self.entry_folds)
+                            counts=np.stack([self.memo[t] for t in tokens]), entry_folds=self.entry_folds,
+                            oof_weights=np.array(json.dumps(self.oof_weights, sort_keys=True)))
         tmp.replace(self.memo_path)
 
     @staticmethod

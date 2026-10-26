@@ -131,3 +131,77 @@ def test_screening_checkpoints_are_never_fold_checkpoints(tmp_path):
     _fold_files(real, 0, 30, "real")
     _fold_files(inp / "screen" / "sole" / "artifacts" / "screening" / "seed2" / "checkpoints", 0, 40, "screen")
     assert find_checkpoint_dirs([inp]) == [real]
+
+
+def test_restore_ensemble_artifacts_and_recipes(tmp_path):
+    import torch
+
+    from src.sessions import (adopt_screening_checkpoints, restore_post_training_artifacts, same_training_recipe,
+                              sha256_file)
+
+    ck = tmp_path / "ck"
+    ck.mkdir()
+    members = [[ck / f"a{f}.pt", ck / f"b{f}.pt"] for f in range(2)]
+    for pair in members:
+        for w in pair:
+            w.write_bytes(w.name.encode())
+    prev = tmp_path / "input" / "sole" / "artifacts"
+    (prev / "oof_cache" / "fold0").mkdir(parents=True)
+    (prev / "oof_cache" / "fold0" / "x.npz").write_text("ens")
+    (prev / "oof_cache" / "fold1").mkdir()
+    (prev / "oof_cache" / "fold1" / "y.npz").write_text("single")
+    joined = "+".join(sha256_file(w) for w in members[0])
+    (prev / "oof_cache" / "manifest.json").write_text(json.dumps(
+        {"folds": {"0": {"weights_sha256": joined}, "1": {"weights_sha256": sha256_file(members[1][0])}}}))
+    flat = [w for pair in members for w in pair]
+    (prev / "test_maps").mkdir()
+    (prev / "test_maps" / "t.npz").write_text("map")
+    (prev / "test_maps" / "manifest.json").write_text(json.dumps({"weights_sha256": [sha256_file(w) for w in flat]}))
+    art = tmp_path / "work" / "artifacts"
+    summary = restore_post_training_artifacts([prev], art, members, log=lambda *_: None, test_weights=flat)
+    assert summary["oof_folds"] == {"0": 1}           # the single-model fold 1 cache is not the ensemble's
+    assert summary["test_maps"] == 2                  # t.npz + manifest.json
+
+    base = {"model": {"encoder": "s"}, "loss": {"a": 1}, "targets": {}, "seed": 1, "n_folds": 5,
+            "train": {"epochs": 30, "workers": 4}, "cv": {"group_mode": "day", "fold_file": "x"}}
+    other = json.loads(json.dumps(base))
+    other["train"]["workers"] = 2
+    other["cv"]["fold_file"] = "y"
+    other["data"] = {"root": "elsewhere"}
+    assert same_training_recipe(base, other)
+    other["model"]["encoder"] = "t"
+    assert not same_training_recipe(base, other)
+
+    scr = tmp_path / "input" / "screening" / "small" / "checkpoints"
+    _fold_files(scr, 0, 30, "scr")
+    torch.save({"model": {}, "config": base}, scr / "fold0_best.pt")
+    dest = tmp_path / "work" / "checkpoints_small"
+    assert adopt_screening_checkpoints(scr, dest, base, 5, log=lambda *_: None) == {0: 30}
+    assert adopt_screening_checkpoints(scr, tmp_path / "other", other, 5, log=lambda *_: None) == {}
+
+
+def test_memo_of_other_checkpoints_is_not_restored(tmp_path):
+    import numpy as np
+
+    from src.sessions import restore_post_training_artifacts, sha256_file
+
+    w = tmp_path / "w0.pt"
+    w.write_bytes(b"w0")
+    good = {"0": sha256_file(w)}
+
+    def memo(d, n, weights):
+        d.mkdir(parents=True, exist_ok=True)
+        extra = {} if weights is None else {"oof_weights": np.array(json.dumps(weights, sort_keys=True))}
+        np.savez_compressed(d / "postprocess_memo.npz", signature=np.array("s"), tokens=np.array([str(i) for i in range(n)]),
+                            counts=np.zeros((n, 3, 4)), entry_folds=np.zeros(3, int), **extra)
+        return d
+
+    stale = memo(tmp_path / "a" / "artifacts", 300, {"0": "other"})
+    legacy = memo(tmp_path / "b" / "artifacts", 200, None)
+    fresh = memo(tmp_path / "c" / "artifacts", 20, good)
+    art = tmp_path / "work"
+    s = restore_post_training_artifacts([stale, legacy, fresh], art, [w], log=lambda *_: None)
+    assert s["memo"] == {"from": str(fresh / "postprocess_memo.npz"), "candidates": 20}
+    art2 = tmp_path / "work2"
+    s = restore_post_training_artifacts([stale, legacy], art2, [w], log=lambda *_: None)
+    assert s["memo"]["candidates"] == 200      # older memos without the record: by size, never the stale one
