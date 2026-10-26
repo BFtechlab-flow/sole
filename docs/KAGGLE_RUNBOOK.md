@@ -146,3 +146,24 @@ ensemble per fold) and `convnext_small` (larger encoder).
   second session (attach this notebook's own output: it resumes).
 * Its outputs live under `artifacts/screening/`, which the main notebook never
   restores as fold checkpoints.
+
+## Two-member ensemble (ConvNeXt-T + ConvNeXt-S)
+
+The screening of fold 0 measured, on the same 139 held-out observations and
+with the calibrated post-processing: ConvNeXt-T 0.4219, ConvNeXt-T +
+ConvNeXt-S ensemble 0.4373 (+0.015, paired bootstrap 95 % interval +0.007 to
++0.024); a second ConvNeXt-T seed gave +0.010 as an ensemble and +0.006 alone
+(seed-to-seed noise of one fold: about ±0.01). The main notebook therefore
+trains `MEMBERS = {convnext_tiny, convnext_small}`: one model per fold and per
+member, checkpoints in `checkpoints/` and `checkpoints_convnext_small/`.
+
+| session | accelerator | inputs | what runs |
+|---|---|---|---|
+| F | GPU T4 × 2 | competition data, main output (`fila-net-sessione2`), screening output (`fila-net-screening`) | the fold-0 ConvNeXt-S of the screening is adopted (same recipe only); folds 1-4 of ConvNeXt-S, two at a time (~7.5 h per pair) |
+| G | GPU T4 × 2 | competition data, output of F | remaining ConvNeXt-S folds, then OOF maps of the per-fold ensembles and test maps of the 10-model ensemble (in parallel) |
+| H, I | None | competition data, output of G | nested calibration and learned rescoring on the new maps, calibrated `submission.csv` |
+
+The previous OOF cache, test maps and calibration memo were produced by other
+checkpoints and are not restored (SHA-256 check); the frozen fold assignment is
+carried by `artifacts/folds.csv`. Released weights of the second member are
+named `convnext_small_fold<k>_best.pt` (`artifacts/release/`).

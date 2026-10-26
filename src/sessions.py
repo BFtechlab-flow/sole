@@ -180,27 +180,54 @@ def _oof_weights(cache_dir: Path) -> dict:
 
 
 def _memo_size(path: Path) -> int:
+    return _memo_info(path)[0]
+
+
+def _memo_info(path: Path):
+    """(number of evaluated candidates, OOF weights the memo was computed on or None for older memos)."""
     import numpy as np
 
     try:
         with np.load(path, allow_pickle=False) as data:
-            return int(len(data["tokens"]))
+            weights = json.loads(str(data["oof_weights"])) if "oof_weights" in data.files else None
+            return int(len(data["tokens"])), weights
     except Exception:  # noqa: BLE001 - unreadable memo: ignored
-        return -1
+        return -1, None
 
 
-def restore_post_training_artifacts(previous_artifacts, art, fold_weights, log=print) -> dict:
+def _fold_sha(weights) -> str:
+    """SHA-256 of a fold's checkpoint, or ``sha1+sha2+...`` for a per-fold ensemble (cache_oof.py's format)."""
+    if isinstance(weights, (list, tuple)):
+        return "+".join(sha256_file(w) for w in weights)
+    return sha256_file(weights)
+
+
+def restore_post_training_artifacts(previous_artifacts, art, fold_weights, log=print, test_weights=None) -> dict:
     """Restore ``oof_cache/``, ``test_maps/`` and ``postprocess_memo.npz`` from previous sessions.
 
     Only data produced by the current checkpoints are restored: OOF folds whose
-    manifest SHA-256 matches ``fold_weights[k]``, test maps whose manifest lists
-    exactly the current fold checkpoints. The calibration memo carries its own
-    signature (checked when it is loaded); the largest one is restored.
+    manifest SHA-256 matches ``fold_weights[k]`` (a path, or a list of paths for
+    a per-fold ensemble), test maps whose manifest lists exactly the checkpoints
+    of the test ensemble (``test_weights``, in order; default: one per fold).
+    The calibration memo carries its own signature (checked when it is loaded);
+    the largest one is restored.
     """
     art = Path(art)
-    current = [sha256_file(w) for w in fold_weights]
+    current = [_fold_sha(w) for w in fold_weights]
+    test_current = [sha256_file(w) for w in test_weights] if test_weights is not None else current
     summary = {"oof_folds": {}, "test_maps": 0, "memo": None}
-    best_memo, best_size = None, _memo_size(art / "postprocess_memo.npz") if (art / "postprocess_memo.npz").exists() else -1
+    current_map = {str(f): sha for f, sha in enumerate(current)}
+
+    def memo_rank(path):
+        # a memo computed on the current OOF maps first, then older memos without that record, by size;
+        # memos of other checkpoints are never restored (the calibration would ignore them anyway)
+        size, weights = _memo_info(path)
+        if weights is not None and weights != current_map:
+            return None
+        return (weights is not None, size)
+
+    here = art / "postprocess_memo.npz"
+    best_memo, best_rank = None, (memo_rank(here) if here.exists() else None)
     for prev in map(Path, previous_artifacts):
         if not prev.is_dir() or prev.resolve() == art.resolve():
             continue
@@ -223,7 +250,7 @@ def restore_post_training_artifacts(previous_artifacts, art, fold_weights, log=p
                 info = json.loads((maps / "manifest.json").read_text())
             except ValueError:
                 info = {}
-            if info.get("weights_sha256") == current:
+            if info.get("weights_sha256") == test_current:
                 summary["test_maps"] += _copy_missing(maps, art / "test_maps")
         feats = prev / "rescoring" / "cache"  # one sub-directory per OOF-weights signature: never stale
         if feats.is_dir():
@@ -231,10 +258,12 @@ def restore_post_training_artifacts(previous_artifacts, art, fold_weights, log=p
                 feats, art / "rescoring" / "cache")
         memo = prev / "postprocess_memo.npz"
         if memo.is_file():
-            size = _memo_size(memo)
-            if size > best_size:
-                best_memo, best_size = memo, size
+            rank = memo_rank(memo)
+            if rank is not None and (best_rank is None or rank > best_rank):
+                best_memo, best_rank = memo, rank
+    best_size = best_rank[1] if best_rank else -1
     if best_memo is not None:
+        art.mkdir(parents=True, exist_ok=True)
         shutil.copy2(best_memo, art / "postprocess_memo.npz")
         summary["memo"] = {"from": str(best_memo), "candidates": best_size}
     for f, n in sorted(summary["oof_folds"].items()):
@@ -246,3 +275,38 @@ def restore_post_training_artifacts(previous_artifacts, art, fold_weights, log=p
     if summary["memo"]:
         log(f"restored the calibration memo ({best_size} evaluated candidates) from {best_memo}")
     return summary
+
+
+#: configuration sections that define how a model was trained (paths, data location and workers do not)
+_RECIPE_KEYS = ("model", "loss", "targets", "seed", "n_folds")
+
+
+def same_training_recipe(a: dict, b: dict) -> bool:
+    """True when two configurations train the same model the same way (data paths and workers aside)."""
+    if any(a.get(k) != b.get(k) for k in _RECIPE_KEYS):
+        return False
+    ta = {k: v for k, v in (a.get("train") or {}).items() if k != "workers"}
+    tb = {k: v for k, v in (b.get("train") or {}).items() if k != "workers"}
+    return ta == tb and (a.get("cv") or {}).get("group_mode") == (b.get("cv") or {}).get("group_mode")
+
+
+def adopt_screening_checkpoints(src, dest, member_cfg: dict, n_folds: int, log=print) -> dict:
+    """Reuse fold checkpoints trained by the screening notebook for an ensemble member.
+
+    They are copied only when every checkpoint in ``src`` was trained with the
+    member's exact recipe (``same_training_recipe``); the notebook then checks,
+    as for any checkpoint, that it was validated on the frozen fold.
+    """
+    import torch
+
+    src = Path(src)
+    bests = sorted(src.glob("fold*_best.pt"))
+    if not bests:
+        return {}
+    for b in bests:
+        saved = torch.load(b, map_location="cpu", weights_only=True).get("config") or {}
+        if not same_training_recipe(saved, member_cfg):
+            log(f"not adopted (trained with another recipe): {b}")
+            return {}
+    restored = collect_previous_checkpoints([src], dest, n_folds, log=log)
+    return restored
