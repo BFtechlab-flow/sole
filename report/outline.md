@@ -8,15 +8,15 @@ text, replace the gray guide text, set `\guideStylefalse` at the end).
 Material in this folder:
 
 * `report_draft.tex` — the text for the title, abstract, introduction,
-  methodology and evaluation sections of the template, with `\fillme{...}`
-  placeholders that name the artifact each number comes from;
+  methodology and evaluation sections of the template, with the measured
+  numbers of the final run (2 nov 2026) filled in;
 * `references_extra.bib` — bibliography entries to append to the template's
   `main.bib`;
 * `figures/pipeline.pdf` — the pipeline figure required by the template
-  (regenerate with `python tools/make_pipeline_figure.py`).
-
-The other figures are written by the notebook in full mode
-(`artifacts/figures/`, `artifacts/oof_export_tuned/oof_rubric_panels.png`).
+  (regenerate with `python tools/make_pipeline_figure.py`);
+* `figures/inputs_and_annotations.png`, `figures/oof_rubric_panels_default.png`,
+  `figures/training_curves.png`, `figures/test_predictions.png` — written by
+  the notebook in the final run (`artifacts/figures/`).
 
 Rules for the numbers: every value comes from a saved artifact of the final
 run (`data_audit.json`, `oof_metrics.json`, `oof_metrics_tuned.json`,

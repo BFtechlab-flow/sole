@@ -1,48 +1,48 @@
 % =============================================================================
-% FILA-Net — draft content for the organizers' Overleaf template
+% FILA-Net — content for the organizers' Overleaf template
 % (https://www.overleaf.com/read/vjztpvrnbrdh, main.tex, ACM sigconf).
 %
 % How to use: copy each block below into the matching place of the
 % template's main.tex, replacing ONLY the gray \guide{...} text (the black
-% template text must stay unchanged). Add the entries of
-% report/references_extra.bib to the template's main.bib, upload
-% report/figures/pipeline.pdf and the figures written by the notebook
-% (artifacts/figures/*.png, artifacts/oof_export_tuned/oof_rubric_panels.png).
+% template text must stay unchanged). Append report/references_extra.bib to
+% the template's main.bib and upload the figures of report/figures/.
 %
-% Every \fillme{...} is a number that must come from a saved artifact of the
-% final run (file given in the placeholder). Do not submit with any \fillme
-% left: define it during writing as
-%   \newcommand{\fillme}[1]{\textcolor{red}{[#1]}}
-% and delete the definition at the end, so LaTeX fails if one is forgotten.
-% Sentences about components that the ablations reject must be removed.
+% Every number comes from a saved artifact of the final run:
+%   results/final_run/oof_metrics_tuned.json, postprocess_search.json,
+%   rescoring.json, weights/manifest.json, and the notebook logs of the
+%   sessions (data audit, OOF metrics with the default post-processing,
+%   screening on fold 0); see claude/fila-net-risultati.md in the project.
+% Component ablations (clDice, orientation head, endpoint repair, TTA) were
+% NOT run: the text says so and reports no number for them.
 % =============================================================================
 
 % ------------------------------------------------------------------ title
 \title{FILA-Net: Topology-Aware Instance Reconstruction of Solar Filaments}
 
 % ------------------------------------------------------------------ abstract (after the black sentence)
-We predict, for every pixel of a $2048\times2048$ H-$\alpha$ image, a set of
-dense fields---filament region, centerline, boundary, normalized distance and
-axial orientation---with a ConvNeXt-T/FPN network, and reconstruct each
-filament as a separate instance with centerline seeds, an
-orientation-consistent endpoint graph repair and a marker-controlled
-watershed. All model and post-processing choices are made on out-of-fold
-predictions scored with the official Panoptic Quality (PQ), using folds that
-keep each observing day together and a nested calibration. Our final
-ensemble reaches an out-of-fold PQ of \fillme{oof\_metrics\_tuned.json: pq}
-(95\% CI \fillme{ci95}), compared with \fillme{data\_audit.json:
-inter\_annotator PQ} between human annotators.
+We predict, for every pixel of a $2048\times2048$ H-$\alpha$ image, dense
+fields---filament region, centerline, boundary, normalized distance and axial
+orientation---with an ensemble of ConvNeXt-T and ConvNeXt-S feature-pyramid
+networks, and reconstruct each filament as a separate instance with
+centerline seeds, an orientation-consistent repair of broken filaments and a
+marker-controlled watershed. A gradient-boosted filter then removes the
+instances whose expected contribution to the official Panoptic Quality (PQ)
+is negative. Every choice is made on out-of-fold (OOF) predictions with folds
+that keep each observing day together, and every calibrated step is
+evaluated with nested cross-validation. The nested OOF PQ of the final
+pipeline is 0.447, against 0.340 between human annotators on the same
+images; the public leaderboard score is 0.39.
 
 % ------------------------------------------------------------------ introduction (after the black text)
 The official score is the micro-averaged PQ over all annotator label sets,
-with a match at IoU $>0.5$; a predicted filament therefore counts as a false
-positive for every annotator who did not draw it. Our design follows from
-this: (i) predict instances that are complete and unfragmented, because a
-filament split in two pieces with IoU $\le0.5$ each yields two false positives
-and one false negative; (ii) report only instances whose expected
-contribution is positive. Section~\ref{sec:methodology} describes the
-pipeline (Fig.~\ref{fig:pipeline}) and Section~\ref{sec:evaluation} its
-out-of-fold evaluation. Code, notebook and weights:
+with a match at IoU $>0.5$: a predicted filament is a false positive for every
+annotator who did not draw it, and a filament split into two pieces with
+IoU $\le0.5$ each costs two false positives and one false negative. Our
+design follows from this: (i) predict complete, unfragmented instances;
+(ii) report only instances whose expected contribution is positive, which
+we show can be decided instance by instance. Section~\ref{sec:methodology}
+describes the pipeline (Fig.~\ref{fig:pipeline}), Section~\ref{sec:evaluation}
+its out-of-fold evaluation. Code, notebook, configuration and weights:
 \url{https://github.com/BFtechlab-flow/sole}.
 
 % ------------------------------------------------------------------ methodology
@@ -55,49 +55,64 @@ out-of-fold evaluation. Code, notebook and weights:
 \end{figure*}
 
 \paragraph{Data and splits.}
-The training set contains \fillme{data\_audit.json: unique\_observations}
-observations with \fillme{annotation\_records} annotator label sets and
-\fillme{filament\_instances} filaments. Every label set is a training sample
-(observations labeled by several annotators are seen once per annotator).
-We use 5 folds grouped by UT day: all observations of a day---the same Sun
-seen by several GONG sites minutes apart---and all their label sets belong to
-one fold, so the out-of-fold (OOF) score is not inflated by near-duplicates.
-Only the annotations provided by the competition are used.
+The training set has 707 observations, 1{,}154 annotator label sets and
+8{,}199 filaments (411 observations labeled once, 145 twice, 151 three
+times). Every label set is a training sample. Observations of the same UT
+day show the same Sun from different GONG sites minutes apart (101 training
+observations share their day), so we use 5 folds grouped by day: all
+observations of a day and all their label sets belong to one fold, and the
+OOF score is not inflated by near-duplicates. The assignment is frozen in
+the repository (\texttt{configs/folds\_day5.csv}). Only the annotations
+provided by the competition are used.
 
 \paragraph{Inputs.}
-Each grayscale image is turned into four channels: intensity normalized
-between its 1st and 99th percentiles, CLAHE~\cite{zuiderveld1994clahe}, a
-ridge response (difference of Gaussians, $\sigma=1.2$ and $5$) that highlights
-thin dark threads, and the normalized radial position, which lets the network
-account for limb darkening.
+Each grayscale image becomes four channels: intensity normalized between
+its 1st and 99th percentiles, CLAHE~\cite{zuiderveld1994clahe}, a ridge
+response (difference of Gaussians, $\sigma=1.2$ and $5$) that highlights
+thin dark threads, and the normalized radial position, which lets the
+network account for limb darkening (Fig.~\ref{fig:inputs}).
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\textwidth]{inputs_and_annotations.png}
+  \caption{The four input channels of a training observation and the
+  filaments drawn by its three annotators (18, 18 and 22 filaments): the
+  label sets disagree on which faint features are filaments and where they
+  end, which bounds the achievable PQ.}
+  \label{fig:inputs}
+\end{figure*}
 
 \paragraph{Network.}
-A ConvNeXt-T encoder~\cite{liu2022convnext} initialized on ImageNet (via
+An ImageNet-initialized ConvNeXt encoder~\cite{liu2022convnext} (via
 timm~\cite{rw2019timm}) feeds a feature pyramid~\cite{lin2017fpn} fused at
-stride~4, refined by a multi-dilation context block, a high-frequency branch
-and a limb-aware gate (\fillme{kept/removed after ablation}), and upsampled to
-full resolution. $1\times1$ heads predict the region, centerline (dilated
-skeleton), boundary and per-filament normalized distance, the axial
+stride~4 with 128 channels, refined by a multi-dilation context block, a
+high-frequency branch and a limb-aware gate, and upsampled to full
+resolution. $1\times1$ heads predict the region, the centerline (dilated
+skeleton), the boundary, the per-filament normalized distance, the axial
 orientation $(\cos2\theta,\sin2\theta)$ of the skeleton, and auxiliary
-width, endpoint/junction and aleatoric-uncertainty maps
-\cite{kendall2017uncertainties}. All targets are derived from the
-segmentation polygons only.
+width, curvature, endpoint, junction and aleatoric-uncertainty
+maps~\cite{kendall2017uncertainties}. All targets are derived from the
+segmentation polygons only. We train two encoders, ConvNeXt-T
+(\texttt{fb\_in1k}) and ConvNeXt-S (\texttt{fb\_in22k\_ft\_in1k}), on the
+same folds.
 
 \paragraph{Training.}
-The loss combines BCE and Dice on region and centerline, BCE on the boundary,
-a smooth-$L_1$ distance term, clDice~\cite{shit2021cldice} for topological
-continuity, a cosine loss on the axial orientation and small weights on the
-auxiliary heads (\fillme{final weights: configs/filanet\_tuned.yaml}). We
-train on random $1024\times1024$ crops (70\% centered on a filament) with
-flips, AdamW (lr $2\cdot10^{-4}$, cosine schedule, warm-up), mixed precision
-and gradient clipping, for \fillme{epochs} epochs. Every two epochs the
-held-out fold is predicted in full and scored with the official PQ; the best
-epoch is kept.
+The loss combines BCE and Dice on region (0.25, 0.30) and centerline (0.10,
+0.15), BCE on the boundary (0.08), a smooth-$L_1$ distance term (0.12),
+clDice~\cite{shit2021cldice} for topological continuity (0.05), a cosine
+loss on the orientation (0.08) and small weights ($\le0.05$) on the
+auxiliary heads. We train on random $1024\times1024$ crops (70\% centered on
+a filament) with flips, AdamW (lr $2\cdot10^{-4}$, one warm-up epoch, cosine
+decay to $10^{-6}$, weight decay $10^{-4}$), batch 2, mixed precision and
+gradient clipping, for 30 epochs. Every two epochs the held-out fold is
+predicted in full and scored with the official PQ, and the best epoch is
+kept (epochs 22--30; Fig.~\ref{fig:curves}).
 
 \paragraph{Inference.}
 Images are processed in $1024$-pixel tiles with $256$-pixel overlap blended
-by a Hann window, with flip test-time augmentation (the orientation field is
-transformed consistently) and averaging over the five fold models.
+by a Hann window, with test-time augmentation by horizontal and vertical
+flips (the orientation field is transformed consistently), and the maps of
+the ten fold models (2 encoders $\times$ 5 folds) are averaged.
 
 \paragraph{Instance reconstruction.}
 The region probability is thresholded and small components are removed; the
@@ -105,95 +120,148 @@ thresholded centerline is skeletonized to obtain seeds. Skeleton endpoints of
 different fragments are joined when the gap is short, aligned with the
 predicted orientation on both sides, supported by the region probability,
 free of boundary evidence and compatible in width (greedy acceptance in order
-of cost, without cycles). A marker-controlled watershed~\cite{beucher1993watershed}
-on the distance map (penalized at predicted boundaries) then assigns every
-foreground pixel to one filament, giving disjoint instances; holes are filled
-and instances optionally dilated. Finally each instance gets a confidence
-(its mean region probability): since adding an instance with match
-probability $p$ and expected IoU $u$ increases the micro PQ only if
-$p\,u > \mathrm{PQ}/2$, instances below a calibrated confidence are dropped.
-All reconstruction parameters are calibrated on OOF predictions
-(Section~\ref{sec:evaluation}). Masks are written as COCO RLE~\cite{lin2014coco}.
+of cost, without cycles). A marker-controlled
+watershed~\cite{beucher1993watershed} on the distance map, penalized at
+predicted boundaries, then assigns every foreground pixel to one filament,
+giving disjoint instances. Its 14 parameters (thresholds, minimum areas,
+repair distances and angles, a minimum mean region probability per instance)
+are calibrated on OOF predictions (Section~\ref{sec:evaluation}). Masks are
+written as COCO RLE~\cite{lin2014coco}.
 
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\linewidth]{test_predictions.png}
-  \caption{Predicted filaments (one color per instance) on test images.
-  \fillme{choose 2--3 representative OOF examples with ground truth instead,
-  including one failure case}.}
-  \label{fig:examples}
-\end{figure}
+\paragraph{Learned filament filter.}
+Predictions are disjoint, so a ground-truth filament is hit by at most one
+of them and removing one prediction changes nothing else. Let $a_j$ be the
+sum of the IoUs of the matches of prediction $j$ over the label sets of its
+image and $d_j$ the sum, over these label sets, of $1/2$ if $j$ matches
+nothing and $h/2$ if it matches $h$ filaments. For a kept set $K$ and $G$
+ground-truth filaments,
+\[
+  \mathrm{PQ}(K)=\frac{\sum_{j\in K}a_j}{G/2+\sum_{j\in K}d_j},
+\]
+exactly (checked against the official counts on all OOF images), so $j$
+should be kept iff $a_j/d_j>\mathrm{PQ}$. We regress
+$y_j=a_j/(2d_j)$ with a histogram gradient-boosted regressor
+\cite{ke2017lightgbm,pedregosa2011sklearn} (300 trees, 15 leaves) on 32
+features of each instance: 25 from the predicted maps (area, elongation,
+skeleton length, mean/max probabilities, contrast with a 3-pixel ring,
+radial position, rank and number of instances in the image) and 7 from the
+H-$\alpha$ image itself (intensity, contrast with its surroundings, ridge
+response). Instances with predicted $y$ below a threshold are dropped. Two
+candidate sets are compared: the calibrated instances, and a permissive set
+(no minimum probability, area $\ge100$ pixels) that the filter thins out.
+The filter is cross-fitted on OOF predictions and uses only the image being
+segmented.
 
 % ------------------------------------------------------------------ evaluation
 \paragraph{Strategy.}
-Our evaluation code reproduces the organizers' notebook exactly (identical
-PQ on random multi-annotator scenes\fillme{ and on our OOF export: run
-tools/verify\_against\_official\_notebook.py on artifacts/oof\_export}). We report OOF
-scores: every training image is predicted by the model of the fold that did
-not see its day. Uncertainty comes from 2{,}000 bootstrap resamples of whole
-observations. Post-processing is calibrated by coordinate ascent with a
-nested scheme: for each fold, parameters are chosen on the other four and
-scored on it, which gives an unbiased estimate of the calibrated pipeline.
+Our scorer reproduces the competition's micro PQ: it gives identical
+scores to the organizers' evaluation functions and to an independent dense
+re-implementation on random multi-annotator scenes with missed, split,
+merged and spurious filaments. We report OOF scores: every
+training image is predicted by the models of the fold that did not see its
+day. Uncertainty comes from 2{,}000 bootstrap resamples of whole
+observations. Calibration is nested: for each outer fold, the 14
+reconstruction parameters are chosen by coordinate ascent on the other four
+folds (300 OOF images, 332 distinct settings evaluated) and scored on it;
+the filter's candidate set, model and threshold are likewise chosen by an
+inner cross-validation that never sees the outer fold. The leaderboard was
+used only as a sanity check, never for a choice.
 
 \begin{table}[t]
-  \caption{Out-of-fold results (official micro PQ, 95\% bootstrap CI).}
+  \caption{OOF results on 707 observations (official micro PQ). Nested:
+  every fold scored with settings chosen without it. Tuned: settings chosen
+  on all folds (slightly optimistic). T: ConvNeXt-T, S: ConvNeXt-S.}
   \label{tab:main}
   \small
+  \setlength{\tabcolsep}{2.5pt}
   \begin{tabular}{lcccc}
     \toprule
-    & PQ & SQ & RQ & TP / FP / FN \\
+    & PQ & SQ & RQ & TP/FP/FN \\
     \midrule
-    Human (annotator vs.\ annotator) & \fillme{} & \fillme{} & \fillme{} & \fillme{} \\
-    FILA-Net, default post-proc. & \fillme{} & \fillme{} & \fillme{} & \fillme{} \\
-    FILA-Net, nested calibration & \fillme{} & -- & -- & -- \\
-    FILA-Net, final (tuned) & \fillme{} & \fillme{} & \fillme{} & \fillme{} \\
+    Human (annotator pairs) & 0.340 & 0.634 & 0.536 & 4292/3709/3709 \\
+    T, default post-proc. & 0.416 & 0.675 & 0.616 & 5417/3975/2782 \\
+    T + S, default & 0.425 & 0.678 & 0.627 & 5488/3827/2711 \\
+    T + S, tuned reconstr. & 0.439 & 0.678 & 0.648 & 5340/2948/2859 \\
+    T + S, nested reconstr. & 0.438 & -- & -- & -- \\
+    \textbf{T + S, nested + filter} & \textbf{0.447} & -- & -- & -- \\
     \bottomrule
   \end{tabular}
 \end{table}
 
 \begin{table}[t]
-  \caption{Ablation (paired bootstrap of the OOF PQ difference with respect
-  to the previous row; \fillme{all folds / fold 0 screening}).}
-  \label{tab:ablation}
+  \caption{Contribution of each step (OOF PQ on 707 observations, nested
+  for the calibrated steps; T: ConvNeXt-T, S: ConvNeXt-S) and public
+  leaderboard score of the submissions made with it.}
+  \label{tab:steps}
   \small
-  \begin{tabular}{lcc}
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{lcccc}
     \toprule
-    Variant & PQ & $\Delta$PQ [95\% CI] \\
+    & \multicolumn{2}{c}{Nested OOF PQ} & \multicolumn{2}{c}{Leaderboard} \\
+    Step & T & T + S & T & T + S \\
     \midrule
-    Baseline (BCE+Dice, no repair, no TTA) & \fillme{} & -- \\
-    + clDice topology loss & \fillme{} & \fillme{} \\
-    + orientation head & \fillme{} & \fillme{} \\
-    + endpoint graph repair & \fillme{} & \fillme{} \\
-    + flip TTA & \fillme{} & \fillme{} \\
-    + calibrated post-processing & \fillme{} & \fillme{} \\
+    Default post-processing & 0.416 & 0.425 & 0.35 & -- \\
+    + calibrated reconstruction & 0.429 & 0.438 & -- & -- \\
+    + filter, map features & 0.435 & 0.443 & 0.38 & -- \\
+    + filter, map + image feat. & 0.441 & 0.447 & 0.38 & 0.39 \\
     \bottomrule
   \end{tabular}
 \end{table}
+
+\paragraph{Results.}
+Table~\ref{tab:main} gives the OOF scores and Table~\ref{tab:steps} the
+gain of each step. The ensemble improves on ConvNeXt-T alone in all five
+folds (default post-processing: 0.422, 0.411, 0.437, 0.421, 0.433 against
+0.408, 0.410, 0.432, 0.409, 0.422); we chose it on fold~0 before training
+the other folds, where a paired bootstrap over its 139 held-out observations
+gave $+0.015$ PQ (95\% CI $+0.007$ to $+0.024$) with calibrated
+post-processing, against $+0.010$ ($+0.002$ to $+0.019$) for a second
+ConvNeXt-T seed. The calibrated reconstruction mainly removes false
+positives (FP $3827\to2948$, RQ $0.627\to0.648$) at constant SQ. The filter
+adds $+0.009$ nested PQ and improves every outer fold (0.434$\to$0.441,
+0.429$\to$0.439, 0.447$\to$0.460, 0.436$\to$0.443, 0.446$\to$0.452); an
+oracle filter on the same candidates would reach 0.511, so ranking
+candidates is still the largest source of loss. Fig.~\ref{fig:rubric}
+shows the rubric distributions: with the tuned reconstruction, 3.7\% of
+ground-truth filaments are fragmented, 3.0\% of predictions merge several
+filaments, 16.4\% of ground-truth filaments are missed and 16.2\% of
+predictions are spurious; matched pairs have a median IoU of 0.68 (human
+pairs: 0.63). Training curves are in Fig.~\ref{fig:curves}. Predicting the
+maps of one test image with 10 models and 4 flips takes 49.5\,s on an
+NVIDIA T4; reconstruction and filter take 1.3\,s on 4 CPU cores. The
+submission has 1{,}043 filaments on the 180 test images.
+Component ablations (clDice, orientation head, endpoint repair, flip TTA)
+were planned but not run within the GPU budget; their individual
+contribution is therefore not measured.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\linewidth]{oof_rubric_panels.png}
-  \caption{OOF distributions of IoU and Dice over overlapping
-  ground-truth/prediction pairs, and one-to-many (fragmentation) /
-  many-to-one (merging) relations.}
+  \includegraphics[width=\linewidth]{oof_rubric_panels_default.png}
+  \caption{OOF rubric of the T + S ensemble (default post-processing):
+  IoU and Dice of overlapping ground-truth/prediction pairs, and
+  one-to-one, one-to-many (fragmentation) and many-to-one (merging)
+  relations.}
   \label{fig:rubric}
 \end{figure}
 
-\paragraph{Results.}
-Table~\ref{tab:main} summarizes the OOF scores and Table~\ref{tab:ablation}
-the contribution of each component. Fig.~\ref{fig:rubric} shows the
-rubric distributions: \fillme{fragmentation\_rate, merge\_rate, miss\_rate,
-spurious\_rate from oof\_metrics\_tuned.json}. The public leaderboard score
-is \fillme{score} (used only as a sanity check). Test inference with the
-5-model ensemble and TTA runs at \fillme{submission.verification.json:
-images\_per\_second} images/s on \fillme{GPU}.
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{training_curves.png}
+  \caption{Training loss and official PQ of the held-out fold during
+  training (default post-processing, no TTA), for the ten models.}
+  \label{fig:curves}
+\end{figure}
 
 \paragraph{Strengths and weaknesses.}
-\fillme{Write from the measured numbers. Typical items to check:} the dense
-orientation and centerline fields make long curved filaments continuous;
-remaining errors are \fillme{misses of faint, small filaments / splits at
-gaps wider than the repair distance / merges of nearby filaments}, and part
-of the error is annotator disagreement (the human baseline above).
-Improvements: global (instead of greedy) endpoint matching, boundary
-refinement at full resolution, and self-supervised pre-training on unlabeled
-GONG frames.
+The dense centerline and orientation fields keep long, curved filaments in
+one piece (fragmentation 3.7\%), and the filter turns the PQ trade-off
+between missed and spurious filaments into an explicit, per-instance
+decision; both are validated without leakage between days. The main
+weakness is the choice of which faint features count as filaments: misses
+and spurious predictions are equally frequent (16\%), as between human
+annotators (Fig.~\ref{fig:inputs}), and the gap to the oracle filter
+(0.447 vs.\ 0.511) shows that instance ranking can still improve. The
+public leaderboard (0.39) is below the OOF estimate (0.447), which suggests
+that the test images differ from the training days; we did not adapt to it.
+Possible improvements: global instead of greedy endpoint matching, more
+ensemble members, and self-supervised pre-training on unlabeled GONG frames.
