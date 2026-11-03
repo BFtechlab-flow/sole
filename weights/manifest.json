@@ -1,6 +1,117 @@
 {
-  "description": "FILA-Net fold checkpoints used for the submitted predictions. EMPTY: no supervised checkpoint has been trained or published yet.",
-  "config": null,
-  "created_utc": null,
-  "files": []
+  "description": "FILA-Net fold checkpoints used for the submitted predictions",
+  "config": "configs/filanet_tuned.yaml",
+  "created_utc": "2026-11-01T21:53:51Z",
+  "files": [
+    {
+      "name": "fold0_best.pt",
+      "url": "https://github.com/BFtechlab-flow/sole/releases/download/v1.0/fold0_best.pt",
+      "sha256": "6ecd2d8cde82ab6d8a62a1a02a1f11fb53da61eacb9629ec059e8babf9380855",
+      "bytes": 121956835,
+      "fold": 0,
+      "epoch": 24,
+      "schema_version": 4,
+      "validation_micro_pq": 0.4046721734805983,
+      "validation_images": 139.0
+    },
+    {
+      "name": "fold1_best.pt",
+      "url": "https://github.com/BFtechlab-flow/sole/releases/download/v1.0/fold1_best.pt",
+      "sha256": "9f000520f0972ae88a9baa6ee3ba754e32a0e5060422138b2557a55e0b3df664",
+      "bytes": 121956835,
+      "fold": 1,
+      "epoch": 28,
+      "schema_version": 4,
+      "validation_micro_pq": 0.41238420095107264,
+      "validation_images": 144.0
+    },
+    {
+      "name": "fold2_best.pt",
+      "url": "https://github.com/BFtechlab-flow/sole/releases/download/v1.0/fold2_best.pt",
+      "sha256": "5cb5b4e19e4a8d49bde79f7154e0394d0495e5f81d43515049f4bbca9e2c9f38",
+      "bytes": 121956835,
+      "fold": 2,
+      "epoch": 24,
+      "schema_version": 4,
+      "validation_micro_pq": 0.42840534586228546,
+      "validation_images": 142.0
+    },
+    {
+      "name": "fold3_best.pt",
+      "url": "https://github.com/BFtechlab-flow/sole/releases/download/v1.0/fold3_best.pt",
+      "sha256": "8692ba43cdba576e981c027f9e01670a401cc44eb4b157c04c7ec5ab4ab0e348",
+      "bytes": 121956835,
+      "fold": 3,
+      "epoch": 26,
+      "schema_version": 4,
+      "validation_micro_pq": 0.4063984403458981,
+      "validation_images": 142.0
+    },
+    {
+      "name": "fold4_best.pt",
+      "url": "https://github.com/BFtechlab-flow/sole/releases/download/v1.0/fold4_best.pt",
+      "sha256": "d58289fb67dd39682f4b3b009b26edbf8a54157e377e4e1377d1c0630c627ee1",
+      "bytes": 121956835,
+      "fold": 4,
+      "epoch": 30,
+      "schema_version": 4,
+      "validation_micro_pq": 0.41543548535412794,
+      "validation_images": 140.0
+    },
+    {
+      "name": "convnext_small_fold0_best.pt",
+      "url": "https://github.com/BFtechlab-flow/sole/releases/download/v1.0/convnext_small_fold0_best.pt",
+      "sha256": "47c83a5578fea1ff55c0a179c8faf4895c5684d13e62af5c580db3dc79f0c1ba",
+      "bytes": 208561899,
+      "fold": 0,
+      "epoch": 22,
+      "schema_version": 4,
+      "validation_micro_pq": 0.4069844350627573,
+      "validation_images": 139.0
+    },
+    {
+      "name": "convnext_small_fold1_best.pt",
+      "url": "https://github.com/BFtechlab-flow/sole/releases/download/v1.0/convnext_small_fold1_best.pt",
+      "sha256": "ba4bad6ff8ab5d2ed6da16224f217dcb37e782503fc9f2dc2ad2d1df13f2a9b3",
+      "bytes": 208561899,
+      "fold": 1,
+      "epoch": 22,
+      "schema_version": 4,
+      "validation_micro_pq": 0.40988549559102583,
+      "validation_images": 144.0
+    },
+    {
+      "name": "convnext_small_fold2_best.pt",
+      "url": "https://github.com/BFtechlab-flow/sole/releases/download/v1.0/convnext_small_fold2_best.pt",
+      "sha256": "51a93627977228cd75271a26a42f71ce2c66304f53d493e8c207d2b921e2ef64",
+      "bytes": 208561899,
+      "fold": 2,
+      "epoch": 26,
+      "schema_version": 4,
+      "validation_micro_pq": 0.42798064390190604,
+      "validation_images": 142.0
+    },
+    {
+      "name": "convnext_small_fold3_best.pt",
+      "url": "https://github.com/BFtechlab-flow/sole/releases/download/v1.0/convnext_small_fold3_best.pt",
+      "sha256": "69aacdb77e05a5ae5a7f93ab7f9424ff697cfa6616c218cca0e385924d61de14",
+      "bytes": 208561899,
+      "fold": 3,
+      "epoch": 28,
+      "schema_version": 4,
+      "validation_micro_pq": 0.4115013373809901,
+      "validation_images": 142.0
+    },
+    {
+      "name": "convnext_small_fold4_best.pt",
+      "url": "https://github.com/BFtechlab-flow/sole/releases/download/v1.0/convnext_small_fold4_best.pt",
+      "sha256": "c314b42a54157cb6aa99c75a90bb17e860f25fe891fbbf8b4b89af8cbdce8fcf",
+      "bytes": 208561899,
+      "fold": 4,
+      "epoch": 30,
+      "schema_version": 4,
+      "validation_micro_pq": 0.4312190765932861,
+      "validation_images": 140.0
+    }
+  ]
 }

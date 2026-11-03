@@ -1,0 +1,248 @@
+{
+  "complete": true,
+  "metric": "official micro PQ (separable per instance; checked against the official counts)",
+  "group_mode": "day",
+  "images": 707,
+  "reconstruction_settings_nested": true,
+  "nested_micro_pq_without_rescoring": 0.43823851259001617,
+  "nested_micro_pq_with_rescoring": 0.44717851353071064,
+  "nested_micro_pq_by_variant": {
+    "filtered/maps": 0.4431228555759525,
+    "filtered/maps+image": 0.44672676921664695,
+    "permissive/maps+image": 0.44693247410762116
+  },
+  "enabled": true,
+  "outer_folds": [
+    {
+      "heldout_fold": 0,
+      "chosen_variant": "permissive/maps+image",
+      "threshold": 0.21931393240627384,
+      "selection_pq": 0.451829420799361,
+      "heldout_pq_without": 0.43417913184666795,
+      "heldout_pq_with": 0.44144134364832316,
+      "kept": 955,
+      "candidates": 1273,
+      "variants": [
+        {
+          "variant": "filtered/maps",
+          "threshold": 0.23355803003066208,
+          "selection_pq": 0.44849711312000967,
+          "heldout_pq": 0.4407289336788156,
+          "kept": 922,
+          "candidates": 1063
+        },
+        {
+          "variant": "filtered/maps+image",
+          "threshold": 0.22914126795683426,
+          "selection_pq": 0.45119563317735656,
+          "heldout_pq": 0.44143693226244923,
+          "kept": 923,
+          "candidates": 1063
+        },
+        {
+          "variant": "permissive/maps+image",
+          "threshold": 0.21931393240627384,
+          "selection_pq": 0.451829420799361,
+          "heldout_pq": 0.44144134364832316,
+          "kept": 955,
+          "candidates": 1273
+        }
+      ]
+    },
+    {
+      "heldout_fold": 1,
+      "chosen_variant": "filtered/maps+image",
+      "threshold": 0.20101099762055527,
+      "selection_pq": 0.45136993798186986,
+      "heldout_pq_without": 0.4289311254579647,
+      "heldout_pq_with": 0.4391873167597089,
+      "kept": 898,
+      "candidates": 1013,
+      "variants": [
+        {
+          "variant": "filtered/maps",
+          "threshold": 0.17659665755515241,
+          "selection_pq": 0.44874422333286523,
+          "heldout_pq": 0.43667828407287596,
+          "kept": 934,
+          "candidates": 1013
+        },
+        {
+          "variant": "filtered/maps+image",
+          "threshold": 0.20101099762055527,
+          "selection_pq": 0.45136993798186986,
+          "heldout_pq": 0.4391873167597089,
+          "kept": 898,
+          "candidates": 1013
+        },
+        {
+          "variant": "permissive/maps+image",
+          "threshold": 0.2041795328560202,
+          "selection_pq": 0.4504396743598363,
+          "heldout_pq": 0.44110060829946524,
+          "kept": 911,
+          "candidates": 1226
+        }
+      ]
+    },
+    {
+      "heldout_fold": 2,
+      "chosen_variant": "permissive/maps+image",
+      "threshold": 0.22821321380165965,
+      "selection_pq": 0.4477353995221617,
+      "heldout_pq_without": 0.4466171238917051,
+      "heldout_pq_with": 0.4600761721783685,
+      "kept": 890,
+      "candidates": 1185,
+      "variants": [
+        {
+          "variant": "filtered/maps",
+          "threshold": 0.2344973248366706,
+          "selection_pq": 0.4442954022351885,
+          "heldout_pq": 0.45111736891081006,
+          "kept": 858,
+          "candidates": 981
+        },
+        {
+          "variant": "filtered/maps+image",
+          "threshold": 0.24509526550012073,
+          "selection_pq": 0.44707233528954554,
+          "heldout_pq": 0.45358037583977967,
+          "kept": 844,
+          "candidates": 981
+        },
+        {
+          "variant": "permissive/maps+image",
+          "threshold": 0.22821321380165965,
+          "selection_pq": 0.4477353995221617,
+          "heldout_pq": 0.4600761721783685,
+          "kept": 890,
+          "candidates": 1185
+        }
+      ]
+    },
+    {
+      "heldout_fold": 3,
+      "chosen_variant": "filtered/maps+image",
+      "threshold": 0.21398552082510372,
+      "selection_pq": 0.4475926222699591,
+      "heldout_pq_without": 0.4359701085856404,
+      "heldout_pq_with": 0.4433211598305166,
+      "kept": 910,
+      "candidates": 1001,
+      "variants": [
+        {
+          "variant": "filtered/maps",
+          "threshold": 0.15269336367702446,
+          "selection_pq": 0.44679594337916934,
+          "heldout_pq": 0.44045584783927594,
+          "kept": 954,
+          "candidates": 1001
+        },
+        {
+          "variant": "filtered/maps+image",
+          "threshold": 0.21398552082510372,
+          "selection_pq": 0.4475926222699591,
+          "heldout_pq": 0.4433211598305166,
+          "kept": 910,
+          "candidates": 1001
+        },
+        {
+          "variant": "permissive/maps+image",
+          "threshold": 0.19973651834173073,
+          "selection_pq": 0.44694682784864564,
+          "heldout_pq": 0.4403459079514057,
+          "kept": 952,
+          "candidates": 1297
+        }
+      ]
+    },
+    {
+      "heldout_fold": 4,
+      "chosen_variant": "permissive/maps+image",
+      "threshold": 0.22217555561666896,
+      "selection_pq": 0.4491781125373641,
+      "heldout_pq_without": 0.4457397650446131,
+      "heldout_pq_with": 0.4524995684995318,
+      "kept": 868,
+      "candidates": 1217,
+      "variants": [
+        {
+          "variant": "filtered/maps",
+          "threshold": 0.24374579186406853,
+          "selection_pq": 0.4457363369244881,
+          "heldout_pq": 0.4472420655278822,
+          "kept": 821,
+          "candidates": 1006
+        },
+        {
+          "variant": "filtered/maps+image",
+          "threshold": 0.21870747567140705,
+          "selection_pq": 0.4468055917979798,
+          "heldout_pq": 0.45653145797350075,
+          "kept": 846,
+          "candidates": 1006
+        },
+        {
+          "variant": "permissive/maps+image",
+          "threshold": 0.22217555561666896,
+          "selection_pq": 0.4491781125373641,
+          "heldout_pq": 0.4524995684995318,
+          "kept": 868,
+          "candidates": 1217
+        }
+      ]
+    }
+  ],
+  "final_variant": "permissive/maps+image",
+  "final_candidate_overrides": {
+    "min_instance_score": 0.0,
+    "min_instance_area": 100
+  },
+  "final_threshold": 0.2608101617049992,
+  "cross_fitted_micro_pq_by_variant": {
+    "filtered/maps": 0.44626715266837386,
+    "filtered/maps+image": 0.44871827084408,
+    "permissive/maps+image": 0.45033604531569527
+  },
+  "all_instances_micro_pq": 0.4391175529973737,
+  "oracle_filtering_ceiling_micro_pq": 0.5111534360840855,
+  "instances": 6148,
+  "features": [
+    "area",
+    "log_area",
+    "region_mean",
+    "region_max",
+    "region_p10",
+    "region_frac_gt_0p7",
+    "center_mean",
+    "center_max",
+    "boundary_mean",
+    "distance_mean",
+    "distance_max",
+    "width_mean",
+    "skeleton_length",
+    "elongation",
+    "extent_major",
+    "extent_minor",
+    "fill_ratio",
+    "radial_position",
+    "ring_region_mean",
+    "ring_contrast",
+    "ring_touching_other",
+    "image_instances",
+    "image_score_rank",
+    "image_foreground_fraction",
+    "nearest_instance_distance",
+    "img_mean",
+    "img_p10",
+    "img_std",
+    "img_ring_mean",
+    "img_contrast",
+    "img_background_contrast",
+    "img_ridge_mean"
+  ],
+  "model": "/kaggle/working/sole/artifacts/rescoring/rescorer.joblib",
+  "sklearn": "1.6.1",
+  "seconds": 4005.4
+}

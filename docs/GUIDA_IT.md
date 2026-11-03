@@ -335,7 +335,7 @@ Attenzione: la loss di ricostruzione del pre-addestramento che scende
    a 2 finali).
 4. **Ablation** nei limiti della quota (§5.4).
 5. **Pesi**: Release GitHub `v1.0` (i `fold*_best.pt` e, se il filtro è
-   attivo, `rescorer.joblib`) + `weights/manifest.json` +
+   attivo, `weights/rescorer.json` nel repository) + `weights/manifest.json` +
    `configs/filanet_tuned.yaml` nel repository.
 6. **Report**: `report/report_draft.tex` nel template Overleaf, con i numeri
    dei file `artifacts/*` (checklist in `docs/final_submission_checklist.md`).
