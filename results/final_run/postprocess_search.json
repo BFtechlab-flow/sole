@@ -1,0 +1,221 @@
+{
+  "metric": "official micro PQ",
+  "mode": "coordinate",
+  "complete": true,
+  "group_mode": "day",
+  "images_evaluated": 300,
+  "subset_images_per_fold": 60,
+  "distinct_candidates_evaluated": 332,
+  "base_oof_micro_pq": 0.4214321512301028,
+  "nested_micro_pq": 0.43567643802639017,
+  "outer_selections": [
+    {
+      "heldout_fold": 0,
+      "selection_pq": 0.4385783732575009,
+      "heldout_pq": 0.43545644163652947,
+      "params": {
+        "region_threshold": 0.45,
+        "center_threshold": 0.35,
+        "min_instance_score": 0.7,
+        "min_instance_area": 250,
+        "fill_holes": false,
+        "seed_unmarked_components": false,
+        "instance_dilation": 0,
+        "min_region_area": 32,
+        "bridge_max_distance": 40,
+        "bridge_min_alignment": 0.8,
+        "bridge_min_region": 0.15,
+        "bridge_max_boundary": 0.75,
+        "bridge_max_width_ratio": 4.0,
+        "bridge_width_weight": 0.7
+      }
+    },
+    {
+      "heldout_fold": 1,
+      "selection_pq": 0.4412737293359505,
+      "heldout_pq": 0.4219820187940675,
+      "params": {
+        "region_threshold": 0.45,
+        "center_threshold": 0.25,
+        "min_instance_score": 0.7,
+        "min_instance_area": 300,
+        "fill_holes": false,
+        "seed_unmarked_components": false,
+        "instance_dilation": 0,
+        "min_region_area": 32,
+        "bridge_max_distance": 40,
+        "bridge_min_alignment": 0.8,
+        "bridge_min_region": 0.15,
+        "bridge_max_boundary": 0.75,
+        "bridge_max_width_ratio": 4.0,
+        "bridge_width_weight": 0.0
+      }
+    },
+    {
+      "heldout_fold": 2,
+      "selection_pq": 0.43684816458084025,
+      "heldout_pq": 0.44055550440337304,
+      "params": {
+        "region_threshold": 0.45,
+        "center_threshold": 0.45,
+        "min_instance_score": 0.7,
+        "min_instance_area": 300,
+        "fill_holes": false,
+        "seed_unmarked_components": false,
+        "instance_dilation": 0,
+        "min_region_area": 32,
+        "bridge_max_distance": 40,
+        "bridge_min_alignment": 0.82,
+        "bridge_min_region": 0.15,
+        "bridge_max_boundary": 0.75,
+        "bridge_max_width_ratio": 4.0,
+        "bridge_width_weight": 0.35
+      }
+    },
+    {
+      "heldout_fold": 3,
+      "selection_pq": 0.437297782709724,
+      "heldout_pq": 0.43857287601300865,
+      "params": {
+        "region_threshold": 0.3,
+        "center_threshold": 0.35,
+        "min_instance_score": 0.7,
+        "min_instance_area": 200,
+        "fill_holes": true,
+        "seed_unmarked_components": false,
+        "instance_dilation": 0,
+        "min_region_area": 32,
+        "bridge_max_distance": 40,
+        "bridge_min_alignment": 0.8,
+        "bridge_min_region": 0.15,
+        "bridge_max_boundary": 0.75,
+        "bridge_max_width_ratio": 2.5,
+        "bridge_width_weight": 0.0
+      }
+    },
+    {
+      "heldout_fold": 4,
+      "selection_pq": 0.4361895503166658,
+      "heldout_pq": 0.441753385423803,
+      "params": {
+        "region_threshold": 0.45,
+        "center_threshold": 0.45,
+        "min_instance_score": 0.7,
+        "min_instance_area": 300,
+        "fill_holes": false,
+        "seed_unmarked_components": false,
+        "instance_dilation": 0,
+        "min_region_area": 64,
+        "bridge_max_distance": 40,
+        "bridge_min_alignment": 0.82,
+        "bridge_min_region": 0.15,
+        "bridge_max_boundary": 0.75,
+        "bridge_max_width_ratio": 4.0,
+        "bridge_width_weight": 0.35
+      }
+    }
+  ],
+  "final_oof_micro_pq": 0.43760013142763626,
+  "final_params": {
+    "region_threshold": 0.45,
+    "center_threshold": 0.45,
+    "min_instance_score": 0.7,
+    "min_instance_area": 300,
+    "fill_holes": false,
+    "seed_unmarked_components": false,
+    "instance_dilation": 0,
+    "min_region_area": 32,
+    "bridge_max_distance": 40,
+    "bridge_min_alignment": 0.8,
+    "bridge_min_region": 0.15,
+    "bridge_max_boundary": 0.75,
+    "bridge_max_width_ratio": 4.0,
+    "bridge_width_weight": 0.35
+  },
+  "final_search_path": [
+    {
+      "step": "start",
+      "pq": 0.4214321512301028
+    },
+    {
+      "round": 0,
+      "key": "region_threshold",
+      "value": 0.52,
+      "pq": 0.4220852969170392
+    },
+    {
+      "round": 0,
+      "key": "min_instance_score",
+      "value": 0.7,
+      "pq": 0.4286544324950495
+    },
+    {
+      "round": 0,
+      "key": "min_instance_area",
+      "value": 300,
+      "pq": 0.42875663405984604
+    },
+    {
+      "round": 0,
+      "key": "fill_holes",
+      "value": true,
+      "pq": 0.42875815436294185
+    },
+    {
+      "round": 0,
+      "key": "min_region_area",
+      "value": 32,
+      "pq": 0.4292873452164244
+    },
+    {
+      "round": 0,
+      "key": "bridge_max_distance",
+      "value": 40,
+      "pq": 0.4331403662325469
+    },
+    {
+      "round": 0,
+      "key": "bridge_min_region",
+      "value": 0.15,
+      "pq": 0.43320254816464615
+    },
+    {
+      "round": 0,
+      "key": "bridge_max_width_ratio",
+      "value": 4.0,
+      "pq": 0.4332666090975795
+    },
+    {
+      "round": 0,
+      "key": "bridge_width_weight",
+      "value": 0.0,
+      "pq": 0.43327124532360645
+    },
+    {
+      "round": 1,
+      "key": "region_threshold",
+      "value": 0.45,
+      "pq": 0.43752605926278887
+    },
+    {
+      "round": 1,
+      "key": "center_threshold",
+      "value": 0.45,
+      "pq": 0.43757798672061604
+    },
+    {
+      "round": 1,
+      "key": "fill_holes",
+      "value": false,
+      "pq": 0.4375994823653628
+    },
+    {
+      "round": 1,
+      "key": "bridge_width_weight",
+      "value": 0.35,
+      "pq": 0.43760013142763626
+    }
+  ],
+  "seconds": 3047.5,
+  "candidates_restored_from_memo": 306
+}

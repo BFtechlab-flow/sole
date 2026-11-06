@@ -245,17 +245,96 @@ def target(a, d):
     return np.where(np.asarray(d) > 0, np.asarray(a) / (2.0 * np.maximum(d, 1e-12)), 0.0)
 
 
+# ----------------------------------------------------------------------------- portable model
+class TreeEnsemble:
+    """Prediction of a fitted ``HistGradientBoostingRegressor`` (squared error) with plain numpy.
+
+    A scikit-learn pickle loads only with the scikit-learn version that wrote it, so the published
+    rescorer is stored as JSON (``to_json``) and predicted here: same trees, same thresholds, same
+    missing-value routing, identical float64 sums (checked in ``tests/test_rescore.py``).
+    """
+
+    def __init__(self, baseline, trees):
+        self.baseline = float(baseline)
+        self.trees = [{k: np.asarray(v, dtype) for (k, dtype), v in zip(self._FIELDS, t)} if isinstance(t, (list, tuple))
+                      else {k: np.asarray(t[k], dtype) for k, dtype in self._FIELDS} for t in trees]
+
+    _FIELDS = (("feature", np.int64), ("threshold", np.float64), ("missing_left", bool),
+               ("left", np.int64), ("right", np.int64), ("is_leaf", bool), ("value", np.float64))
+
+    @classmethod
+    def from_sklearn(cls, model):
+        if getattr(model, "loss", "squared_error") != "squared_error" or model.n_trees_per_iteration_ != 1:
+            raise ValueError("only single-output squared-error models are supported")
+        if getattr(model, "_preprocessor", None) is not None or getattr(model, "is_categorical_", None) is not None:
+            raise ValueError("categorical features are not supported")
+        trees = []
+        for (predictor,) in model._predictors:
+            n = predictor.nodes
+            trees.append({"feature": n["feature_idx"], "threshold": n["num_threshold"],
+                          "missing_left": n["missing_go_to_left"], "left": n["left"], "right": n["right"],
+                          "is_leaf": n["is_leaf"], "value": n["value"]})
+        return cls(np.asarray(model._baseline_prediction).ravel()[0], trees)
+
+    def predict(self, X) -> np.ndarray:
+        X = np.asarray(X, np.float64)
+        rows = np.arange(len(X))
+        out = np.full(len(X), self.baseline, np.float64)
+        for t in self.trees:
+            node = np.zeros(len(X), np.int64)
+            active = ~t["is_leaf"][node]
+            while active.any():
+                i, nd = rows[active], node[active]
+                x = X[i, t["feature"][nd]]
+                go_left = np.where(np.isnan(x), t["missing_left"][nd], x <= t["threshold"][nd])
+                node[i] = np.where(go_left, t["left"][nd], t["right"][nd])
+                active = ~t["is_leaf"][node]
+            out += t["value"][node]
+        return out
+
+    def to_dict(self) -> dict:
+        return {"baseline": self.baseline,
+                "trees": [[t[k].tolist() for k, _ in self._FIELDS] for t in self.trees],
+                "tree_fields": [k for k, _ in self._FIELDS]}
+
+    @classmethod
+    def from_dict(cls, d):
+        if list(d["tree_fields"]) != [k for k, _ in cls._FIELDS]:
+            raise ValueError("unknown tree layout")
+        return cls(d["baseline"], d["trees"])
+
+
+def export_rescorer(bundle: dict, path) -> Path:
+    """Write a rescorer bundle (as saved by ``scripts/train_rescorer.py``) as version-independent JSON."""
+    import json
+
+    out = {k: v for k, v in bundle.items() if k != "model"}
+    out["feature_names"] = list(out["feature_names"])
+    out["model"] = TreeEnsemble.from_sklearn(bundle["model"]).to_dict()
+    out["format"] = "fila-net tree ensemble v1"
+    path = Path(path)
+    path.write_text(json.dumps(out, separators=(",", ":")), encoding="utf-8")
+    return path
+
+
 # ----------------------------------------------------------------------------- inference
 _LOADED: dict = {}
 
 
 def load_rescorer(path):
-    import joblib
-
+    """Rescorer bundle from ``rescorer.json`` (portable) or ``rescorer.joblib`` (same scikit-learn only)."""
     path = Path(path)
     key = str(path.resolve())
     if key not in _LOADED:
-        bundle = joblib.load(path)
+        if path.suffix == ".json":
+            import json
+
+            bundle = json.loads(path.read_text(encoding="utf-8"))
+            bundle["model"] = TreeEnsemble.from_dict(bundle["model"])
+        else:
+            import joblib
+
+            bundle = joblib.load(path)
         feature_set = bundle.setdefault("feature_set", "maps")
         if (bundle.get("features_version") != FEATURES_VERSION or feature_set not in FEATURE_SETS
                 or tuple(bundle["feature_names"]) != FEATURE_SETS[feature_set]):

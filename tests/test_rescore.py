@@ -184,3 +184,21 @@ def test_postprocess_maps_uses_candidate_overrides(tmp_path):
     labels, _ = postprocess_maps(pred, cfg)
     assert labels.max() == 2  # the weak candidate is back, and the learned filter kept it
 
+
+
+def test_portable_rescorer_predicts_exactly_like_scikit_learn(tmp_path):
+    from src.rescore import FEATURES_VERSION, TreeEnsemble, export_rescorer, load_rescorer
+
+    rng = np.random.default_rng(1)
+    x = rng.normal(size=(400, len(FEATURE_NAMES))) * rng.uniform(0.1, 100, size=len(FEATURE_NAMES))
+    x[rng.random(x.shape) < 0.05] = np.nan  # missing values follow the learned routing
+    y = np.nan_to_num(x[:, 0]) * 0.01 + rng.random(400)
+    model = fit_model(x, y)
+    bundle = {"model": model, "feature_set": "maps", "feature_names": FEATURE_NAMES,
+              "features_version": FEATURES_VERSION, "threshold": 0.3}
+    path = export_rescorer(bundle, tmp_path / "r.json")
+    loaded = load_rescorer(path)
+    assert isinstance(loaded["model"], TreeEnsemble) and loaded["threshold"] == 0.3
+    xt = rng.normal(size=(1000, len(FEATURE_NAMES))) * 50
+    xt[rng.random(xt.shape) < 0.05] = np.nan
+    assert np.array_equal(loaded["model"].predict(xt), model.predict(xt))

@@ -46,10 +46,10 @@ def draw(out_dir: Path):
     stages = [
         ("H-alpha image", ["GONG JPEG", "2048 x 2048, 8-bit", "grayscale"], "data"),
         ("4 input channels", ["robust normalisation", "CLAHE", "ridge (DoG)", "radial position"], "data"),
-        ("ConvNeXt-T+FPN", ["ImageNet init.", "stride-4 decoder", "context / frequency", "limb gate (opt.)"], "net"),
-        ("dense fields", ["region, centerline", "boundary, distance", "axial orientation", "width, keypoints,", "embedding (opt.)"], "net"),
-        ("tiled inference", ["1024 px tiles", "256 px overlap", "Hann blending", "flip TTA, AMP", "5-fold ensemble"], "net"),
-        ("instances", ["threshold, seeds", "endpoint graph", "repair, marker", "watershed, fill,", "dilate, filter"], "post"),
+        ("ConvNeXt + FPN", ["T and S encoders,", "ImageNet init.", "stride-4 decoder", "context / frequency", "limb gate"], "net"),
+        ("dense fields", ["region, centerline", "boundary, distance", "axial orientation", "width, curvature,", "keypoints, uncertainty"], "net"),
+        ("tiled inference", ["1024 px tiles", "256 px overlap", "Hann blending", "4-flip TTA, AMP", "10-model ensemble"], "net"),
+        ("instances", ["threshold, seeds", "endpoint graph", "repair, marker", "watershed, then", "learned PQ filter"], "post"),
         ("submission", ["disjoint masks", "COCO RLE counts", "validated CSV"], "post"),
     ]
     for x, (title, lines, kind) in zip(xs, stages):
@@ -64,7 +64,7 @@ def draw(out_dir: Path):
         ("supervision", ["targets derived from the", "polygons only; BCE + Dice,", "clDice, orientation, ..."], "eval"),
         ("5-fold CV by UT day", ["best epoch = best official", "micro PQ on held-out fold", "(every annotator scored)"], "eval"),
         ("out-of-fold maps", ["one prediction per image", "official PQ + bootstrap CI", "rubric distributions"], "eval"),
-        ("nested calibration", ["post-processing chosen on", "other folds, scored on the", "held-out fold; ablations"], "eval"),
+        ("nested calibration", ["reconstruction + filter", "chosen on the other folds,", "scored on the held-out fold"], "eval"),
     ]
     for x, (title, lines, kind) in zip(xb, bottom):
         box(ax, x, bot, wb, hb, title, lines, kind)

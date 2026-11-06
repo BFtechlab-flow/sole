@@ -6,11 +6,11 @@ IEEE BigData Cup 2026): every solar filament in a 2048 × 2048 GONG H-alpha
 image is segmented as a separate instance and written as a COCO RLE.
 
 ```text
-H-alpha JPEG ─► 4 input channels ─► ConvNeXt-T + FPN (multi-head) ─► dense fields
-(normalised, CLAHE, ridge, radial)   region · centerline · boundary · distance
-                                     orientation · width · endpoint/junction · …
+H-alpha JPEG ─► 4 input channels ─► ConvNeXt-T + ConvNeXt-S FPN ensemble ─► dense fields
+(normalised, CLAHE, ridge, radial)   (5 folds each, flip TTA)   region · centerline · boundary
+                                                                distance · orientation · width · …
 dense fields ─► thresholds ─► centerline seeds ─► endpoint graph repair ─► marker watershed
-            ─► hole filling / dilation / confidence filter ─► disjoint instances ─► RLE CSV
+            ─► learned PQ filter (gradient-boosted trees) ─► disjoint instances ─► RLE CSV
 ```
 
 ## Status — read this first
@@ -20,7 +20,7 @@ dense fields ─► thresholds ─► centerline seeds ─► endpoint graph rep
 | competition metric (PQ) | implemented in `src/pq_official.py`; gives **identical** scores to the organizers' notebook functions on random multi-annotator scenes (`tools/verify_against_official_notebook.py`, `tests/test_official_parity.py`) |
 | submission format | writer + strict validator (header, no quotes, unique ids, RLE decodes to 2048 × 2048, no empty/overlapping masks) |
 | training / OOF / calibration / ablation / inference | implemented, tested end to end on a synthetic dataset (CPU, `tests/test_pipeline_smoke.py`, `tests/test_notebook_smoke.py`) |
-| **supervised training on the official data** | **not run yet** — there is no trained checkpoint, no OOF score and no leaderboard score in this repository |
+| **final run on the official data** | done (2 nov 2026): **nested out-of-fold micro PQ 0.447** (human annotators: 0.340), public leaderboard **0.39**; configuration `configs/filanet_tuned.yaml`, weights `weights/` (release `v1.0`), numbers in `results/final_run/` and `report/report_draft.tex` |
 
 No number is reported here unless it was produced by the commands below on
 the official data. Every score the pipeline writes is the official micro PQ.
@@ -156,7 +156,7 @@ scripts/     command-line entry points (audit, train, OOF, calibration, ablation
 src/         library code (data, model, losses, inference, reconstruction, metric, submission)
 tests/       unit, parity and end-to-end tests (pytest)
 tools/       synthetic dataset, metric parity check, weights manifest/fetch, figures
-weights/     manifest of the published checkpoints (empty until training is done)
+weights/     manifest of the 10 published checkpoints + the learned filter (rescorer.json)
 ```
 
 ## License

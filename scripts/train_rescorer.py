@@ -56,8 +56,8 @@ from src.evaluation import group_records_by_image, label_map_to_rles, score_imag
 from src.oof import RECONSTRUCTION_KEYS, cache_path, load_prediction
 from src.oof_eval import default_workers
 from src.reconstruct import reconstruct_label_map
-from src.rescore import (FEATURE_SETS, FEATURES_VERSION, best_threshold, fit_model, image_features,
-                         instance_contributions, instance_features, pq_of_selection, target)
+from src.rescore import (FEATURE_SETS, FEATURES_VERSION, best_threshold, export_rescorer, fit_model,
+                         image_features, instance_contributions, instance_features, pq_of_selection, target)
 from src.utils import load_yaml
 
 CANDIDATE_SETS = ("filtered", "permissive")
@@ -323,10 +323,12 @@ def main():
     import joblib
     import sklearn
 
-    model_path = out_dir / "rescorer.joblib"
-    joblib.dump({"model": model, "feature_set": feats, "feature_names": FEATURE_SETS[feats],
-                 "features_version": FEATURES_VERSION, "candidate_overrides": overrides[cand], "threshold": thr,
-                 "sklearn": sklearn.__version__, "params_token": _token(final_params)}, model_path)
+    bundle = {"model": model, "feature_set": feats, "feature_names": FEATURE_SETS[feats],
+              "features_version": FEATURES_VERSION, "candidate_overrides": overrides[cand], "threshold": thr,
+              "sklearn": sklearn.__version__, "params_token": _token(final_params)}
+    joblib.dump(bundle, out_dir / "rescorer.joblib")
+    # the config points to the version-independent copy (a pickle needs the same scikit-learn to load)
+    model_path = export_rescorer(bundle, out_dir / "rescorer.json")
     enabled = nested_with > nested_without
     report = {
         "complete": True,
