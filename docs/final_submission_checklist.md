@@ -10,7 +10,7 @@ Submission*): the report PDF and the public repository link.
 - [ ] `requirements.txt` lists every package with its exact version.
 - [ ] `notebooks/filanet_end_to_end.ipynb` illustrates and runs the entire
       pipeline (`tests/test_notebook_smoke.py` passes).
-- [ ] `weights/manifest.json` lists the five checkpoints of the submission
+- [ ] `weights/manifest.json` lists the ten checkpoints of the submission
       with SHA-256; the GitHub release with the files exists;
       `python tools/weights.py fetch` works on a clean clone.
 - [ ] `configs/filanet_tuned.yaml` (the exact post-processing of the
