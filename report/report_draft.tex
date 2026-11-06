@@ -226,7 +226,8 @@ shows the rubric distributions: with the tuned reconstruction, 3.7\% of
 ground-truth filaments are fragmented, 3.0\% of predictions merge several
 filaments, 16.4\% of ground-truth filaments are missed and 16.2\% of
 predictions are spurious; matched pairs have a median IoU of 0.68 (human
-pairs: 0.63). Training curves are in Fig.~\ref{fig:curves}. Predicting the
+pairs: 0.63). Fig.~\ref{fig:test} shows predictions on test images and
+Fig.~\ref{fig:curves} the training curves. Predicting the
 maps of one test image with 10 models and 4 flips takes 49.5\,s on an
 NVIDIA T4; reconstruction and filter take 1.3\,s on 4 CPU cores. The
 submission has 1{,}043 filaments on the 180 test images.
@@ -250,6 +251,15 @@ contribution is therefore not measured.
   \caption{Training loss and official PQ of the held-out fold during
   training (default post-processing, no TTA), for the ten models.}
   \label{fig:curves}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{test_predictions.png}
+  \caption{Filaments predicted by the submitted pipeline on three test
+  images (one color per instance); the elongated filament of the middle
+  image is predicted as a single instance.}
+  \label{fig:test}
 \end{figure}
 
 \paragraph{Strengths and weaknesses.}
