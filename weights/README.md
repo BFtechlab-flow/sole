@@ -5,10 +5,15 @@ submission sha256 `3c851c45091e0268d59d8f8a896a57eafea9fe88ff66137db4e6422f2d0d4
 
 | file | what | where |
 |---|---|---|
-| `fold{0..4}_best.pt` | ConvNeXt-T + FPN, one model per fold (122 MB each) | GitHub Release `v1.0` |
-| `convnext_small_fold{0..4}_best.pt` | ConvNeXt-S + FPN, one model per fold (209 MB each) | GitHub Release `v1.0` |
+| `fold{0..4}_best.pt` | ConvNeXt-T + FPN, one model per fold (122 MB each) | GitHub Release `v1.0` (as `.zip`) |
+| `convnext_small_fold{0..4}_best.pt` | ConvNeXt-S + FPN, one model per fold (209 MB each) | GitHub Release `v1.0` (as `.zip`) |
 | `rescorer.json` | learned filament filter (300 gradient-boosted trees, 0.4 MB) | this folder |
 | `manifest.json` | URL, SHA-256, size, best epoch and validation PQ of each checkpoint | this folder |
+
+In the release the checkpoints are named `.zip` (a PyTorch checkpoint is a
+zip archive and the upload kept that extension); the bytes are the `.pt`
+files, and `tools/weights.py fetch` saves them as `.pt` after checking the
+SHA-256 of `manifest.json`.
 
 Each checkpoint is the epoch with the best official micro PQ on its held-out
 fold (`validation_micro_pq` in the manifest) and stores its own architecture,
