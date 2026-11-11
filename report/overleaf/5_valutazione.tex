@@ -1,0 +1,122 @@
+\paragraph{Strategy.}
+Our scorer reproduces the competition's micro PQ: it gives identical
+scores to the organizers' evaluation functions and to an independent dense
+re-implementation on random multi-annotator scenes with missed, split,
+merged and spurious filaments. We report OOF scores: every
+training image is predicted by the models of the fold that did not see its
+day. Uncertainty comes from 2{,}000 bootstrap resamples of whole
+observations. Calibration is nested: for each outer fold, the 14
+reconstruction parameters are chosen by coordinate ascent on the other four
+folds (300 OOF images, 332 distinct settings evaluated) and scored on it;
+the filter's candidate set, model and threshold are likewise chosen by an
+inner cross-validation that never sees the outer fold. The leaderboard was
+used only as a sanity check, never for a choice.
+
+\begin{table}[t]
+  \caption{OOF results on 707 observations (official micro PQ). Nested:
+  every fold scored with settings chosen without it. Tuned: settings chosen
+  on all folds (slightly optimistic). T: ConvNeXt-T, S: ConvNeXt-S.}
+  \label{tab:main}
+  \small
+  \setlength{\tabcolsep}{2.5pt}
+  \begin{tabular}{lcccc}
+    \toprule
+    & PQ & SQ & RQ & TP/FP/FN \\
+    \midrule
+    Human (annotator pairs) & 0.340 & 0.634 & 0.536 & 4292/3709/3709 \\
+    T, default post-proc. & 0.416 & 0.675 & 0.616 & 5417/3975/2782 \\
+    T + S, default & 0.425 & 0.678 & 0.627 & 5488/3827/2711 \\
+    T + S, tuned reconstr. & 0.439 & 0.678 & 0.648 & 5340/2948/2859 \\
+    T + S, nested reconstr. & 0.438 & -- & -- & -- \\
+    \textbf{T + S, nested + filter} & \textbf{0.447} & -- & -- & -- \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[t]
+  \caption{Contribution of each step (OOF PQ on 707 observations, nested
+  for the calibrated steps; T: ConvNeXt-T, S: ConvNeXt-S) and public
+  leaderboard score of the submissions made with it.}
+  \label{tab:steps}
+  \small
+  \setlength{\tabcolsep}{4pt}
+  \begin{tabular}{lcccc}
+    \toprule
+    & \multicolumn{2}{c}{Nested OOF PQ} & \multicolumn{2}{c}{Leaderboard} \\
+    Step & T & T + S & T & T + S \\
+    \midrule
+    Default post-processing & 0.416 & 0.425 & 0.35 & -- \\
+    + calibrated reconstruction & 0.429 & 0.438 & -- & -- \\
+    + filter, map features & 0.435 & 0.443 & 0.38 & -- \\
+    + filter, map + image feat. & 0.441 & 0.447 & 0.38 & 0.39 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Results.}
+Table~\ref{tab:main} gives the OOF scores and Table~\ref{tab:steps} the
+gain of each step. The ensemble improves on ConvNeXt-T alone in all five
+folds (default post-processing: 0.422, 0.411, 0.437, 0.421, 0.433 against
+0.408, 0.410, 0.432, 0.409, 0.422); we chose it on fold~0 before training
+the other folds, where a paired bootstrap over its 139 held-out observations
+gave $+0.015$ PQ (95\% CI $+0.007$ to $+0.024$) with calibrated
+post-processing, against $+0.010$ ($+0.002$ to $+0.019$) for a second
+ConvNeXt-T seed. The calibrated reconstruction mainly removes false
+positives (FP $3827\to2948$, RQ $0.627\to0.648$) at constant SQ. The filter
+adds $+0.009$ nested PQ and improves every outer fold (0.434$\to$0.441,
+0.429$\to$0.439, 0.447$\to$0.460, 0.436$\to$0.443, 0.446$\to$0.452); an
+oracle filter on the same candidates would reach 0.511, so ranking
+candidates is still the largest source of loss. Fig.~\ref{fig:rubric}
+shows the rubric distributions: with the tuned reconstruction, 3.7\% of
+ground-truth filaments are fragmented, 3.0\% of predictions merge several
+filaments, 16.4\% of ground-truth filaments are missed and 16.2\% of
+predictions are spurious; matched pairs have a median IoU of 0.68 (human
+pairs: 0.63). Fig.~\ref{fig:test} shows predictions on test images and
+Fig.~\ref{fig:curves} the training curves. Predicting the
+maps of one test image with 10 models and 4 flips takes 49.5\,s on an
+NVIDIA T4; reconstruction and filter take 1.3\,s on 4 CPU cores. The
+submission has 1{,}043 filaments on the 180 test images.
+Component ablations (clDice, orientation head, endpoint repair, flip TTA)
+were planned but not run within the GPU budget; their individual
+contribution is therefore not measured.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{oof_rubric_panels_default.png}
+  \caption{OOF rubric of the T + S ensemble (default post-processing):
+  IoU and Dice of overlapping ground-truth/prediction pairs, and
+  one-to-one, one-to-many (fragmentation) and many-to-one (merging)
+  relations.}
+  \label{fig:rubric}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{training_curves.png}
+  \caption{Training loss and official PQ of the held-out fold during
+  training (default post-processing, no TTA), for the ten models.}
+  \label{fig:curves}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{test_predictions.png}
+  \caption{Filaments predicted by the submitted pipeline on three test
+  images (one color per instance); the elongated filament of the middle
+  image is predicted as a single instance.}
+  \label{fig:test}
+\end{figure}
+
+\paragraph{Strengths and weaknesses.}
+The dense centerline and orientation fields keep long, curved filaments in
+one piece (fragmentation 3.7\%), and the filter turns the PQ trade-off
+between missed and spurious filaments into an explicit, per-instance
+decision; both are validated without leakage between days. The main
+weakness is the choice of which faint features count as filaments: misses
+and spurious predictions are equally frequent (16\%), as between human
+annotators (Fig.~\ref{fig:inputs}), and the gap to the oracle filter
+(0.447 vs.\ 0.511) shows that instance ranking can still improve. The
+public leaderboard (0.39) is below the OOF estimate (0.447), which suggests
+that the test images differ from the training days; we did not adapt to it.
+Possible improvements: global instead of greedy endpoint matching, more
+ensemble members, and self-supervised pre-training on unlabeled GONG frames.

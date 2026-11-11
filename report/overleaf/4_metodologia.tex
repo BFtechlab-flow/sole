@@ -1,0 +1,105 @@
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\textwidth]{pipeline.pdf}
+  \caption{FILA-Net pipeline. Top: inference on one image. Bottom: training,
+  validation and calibration, all scored with the official PQ.}
+  \label{fig:pipeline}
+\end{figure*}
+
+\paragraph{Data and splits.}
+The training set has 707 observations, 1{,}154 annotator label sets and
+8{,}199 filaments (411 observations labeled once, 145 twice, 151 three
+times). Every label set is a training sample. Observations of the same UT
+day show the same Sun from different GONG sites minutes apart (101 training
+observations share their day), so we use 5 folds grouped by day: all
+observations of a day and all their label sets belong to one fold, and the
+OOF score is not inflated by near-duplicates. The assignment is frozen in
+the repository (\texttt{configs/folds\_day5.csv}). Only the annotations
+provided by the competition are used.
+
+\paragraph{Inputs.}
+Each grayscale image becomes four channels: intensity normalized between
+its 1st and 99th percentiles, CLAHE~\cite{zuiderveld1994clahe}, a ridge
+response (difference of Gaussians, $\sigma=1.2$ and $5$) that highlights
+thin dark threads, and the normalized radial position, which lets the
+network account for limb darkening (Fig.~\ref{fig:inputs}).
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\textwidth]{inputs_and_annotations.png}
+  \caption{The four input channels of a training observation and the
+  filaments drawn by its three annotators (18, 18 and 22 filaments): the
+  label sets disagree on which faint features are filaments and where they
+  end, which bounds the achievable PQ.}
+  \label{fig:inputs}
+\end{figure*}
+
+\paragraph{Network.}
+An ImageNet-initialized ConvNeXt encoder~\cite{liu2022convnext} (via
+timm~\cite{rw2019timm}) feeds a feature pyramid~\cite{lin2017fpn} fused at
+stride~4 with 128 channels, refined by a multi-dilation context block, a
+high-frequency branch and a limb-aware gate, and upsampled to full
+resolution. $1\times1$ heads predict the region, the centerline (dilated
+skeleton), the boundary, the per-filament normalized distance, the axial
+orientation $(\cos2\theta,\sin2\theta)$ of the skeleton, and auxiliary
+width, curvature, endpoint, junction and aleatoric-uncertainty
+maps~\cite{kendall2017uncertainties}. All targets are derived from the
+segmentation polygons only. We train two encoders, ConvNeXt-T
+(\texttt{fb\_in1k}) and ConvNeXt-S (\texttt{fb\_in22k\_ft\_in1k}), on the
+same folds.
+
+\paragraph{Training.}
+The loss combines BCE and Dice on region (0.25, 0.30) and centerline (0.10,
+0.15), BCE on the boundary (0.08), a smooth-$L_1$ distance term (0.12),
+clDice~\cite{shit2021cldice} for topological continuity (0.05), a cosine
+loss on the orientation (0.08) and small weights ($\le0.05$) on the
+auxiliary heads. We train on random $1024\times1024$ crops (70\% centered on
+a filament) with flips, AdamW (lr $2\cdot10^{-4}$, one warm-up epoch, cosine
+decay to $10^{-6}$, weight decay $10^{-4}$), batch 2, mixed precision and
+gradient clipping, for 30 epochs. Every two epochs the held-out fold is
+predicted in full and scored with the official PQ, and the best epoch is
+kept (epochs 22--30; Fig.~\ref{fig:curves}).
+
+\paragraph{Inference.}
+Images are processed in $1024$-pixel tiles with $256$-pixel overlap blended
+by a Hann window, with test-time augmentation by horizontal and vertical
+flips (the orientation field is transformed consistently), and the maps of
+the ten fold models (2 encoders $\times$ 5 folds) are averaged.
+
+\paragraph{Instance reconstruction.}
+The region probability is thresholded and small components are removed; the
+thresholded centerline is skeletonized to obtain seeds. Skeleton endpoints of
+different fragments are joined when the gap is short, aligned with the
+predicted orientation on both sides, supported by the region probability,
+free of boundary evidence and compatible in width (greedy acceptance in order
+of cost, without cycles). A marker-controlled
+watershed~\cite{beucher1993watershed} on the distance map, penalized at
+predicted boundaries, then assigns every foreground pixel to one filament,
+giving disjoint instances. Its 14 parameters (thresholds, minimum areas,
+repair distances and angles, a minimum mean region probability per instance)
+are calibrated on OOF predictions (Section~\ref{sec:evaluation}). Masks are
+written as COCO RLE~\cite{lin2014coco}.
+
+\paragraph{Learned filament filter.}
+Predictions are disjoint, so a ground-truth filament is hit by at most one
+of them and removing one prediction changes nothing else. Let $a_j$ be the
+sum of the IoUs of the matches of prediction $j$ over the label sets of its
+image and $d_j$ the sum, over these label sets, of $1/2$ if $j$ matches
+nothing and $h/2$ if it matches $h$ filaments. For a kept set $K$ and $G$
+ground-truth filaments,
+\[
+  \mathrm{PQ}(K)=\frac{\sum_{j\in K}a_j}{G/2+\sum_{j\in K}d_j},
+\]
+exactly (checked against the official counts on all OOF images), so $j$
+should be kept iff $a_j/d_j>\mathrm{PQ}$. We regress
+$y_j=a_j/(2d_j)$ with a histogram gradient-boosted regressor
+\cite{ke2017lightgbm,pedregosa2011sklearn} (300 trees, 15 leaves) on 32
+features of each instance: 25 from the predicted maps (area, elongation,
+skeleton length, mean/max probabilities, contrast with a 3-pixel ring,
+radial position, rank and number of instances in the image) and 7 from the
+H-$\alpha$ image itself (intensity, contrast with its surroundings, ridge
+response). Instances with predicted $y$ below a threshold are dropped. Two
+candidate sets are compared: the calibrated instances, and a permissive set
+(no minimum probability, area $\ge100$ pixels) that the filter thins out.
+The filter is cross-fitted on OOF predictions and uses only the image being
+segmented.

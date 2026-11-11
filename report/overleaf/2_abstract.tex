@@ -1,0 +1,12 @@
+We predict, for every pixel of a $2048\times2048$ H-$\alpha$ image, dense
+fields---filament region, centerline, boundary, normalized distance and axial
+orientation---with an ensemble of ConvNeXt-T and ConvNeXt-S feature-pyramid
+networks, and reconstruct each filament as a separate instance with
+centerline seeds, an orientation-consistent repair of broken filaments and a
+marker-controlled watershed. A gradient-boosted filter then removes the
+instances whose expected contribution to the official Panoptic Quality (PQ)
+is negative. Every choice is made on out-of-fold (OOF) predictions with folds
+that keep each observing day together, and every calibrated step is
+evaluated with nested cross-validation. The nested OOF PQ of the final
+pipeline is 0.447, against 0.340 between human annotators on the same
+images; the public leaderboard score is 0.39.

@@ -1,0 +1,10 @@
+The official score is the micro-averaged PQ over all annotator label sets,
+with a match at IoU $>0.5$: a predicted filament is a false positive for every
+annotator who did not draw it, and a filament split into two pieces with
+IoU $\le0.5$ each costs two false positives and one false negative. Our
+design follows from this: (i) predict complete, unfragmented instances;
+(ii) report only instances whose expected contribution is positive, which
+we show can be decided instance by instance. Section~\ref{sec:methodology}
+describes the pipeline (Fig.~\ref{fig:pipeline}), Section~\ref{sec:evaluation}
+its out-of-fold evaluation. Code, notebook, configuration and weights:
+\url{https://github.com/BFtechlab-flow/sole}.
